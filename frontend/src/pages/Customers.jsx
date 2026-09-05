@@ -6,13 +6,14 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { fmt } from "@/lib/utils";
 import { Link } from "react-router-dom";
-import { Search, Plus, FileText, Edit, KeyRound } from "lucide-react";
+import { Search, Plus, FileText, Edit, KeyRound, Eye } from "lucide-react";
 
 function CustomerForm({ initial, onSaved, onClose }) {
-  const [f, setF] = useState(initial || { name: "", phone: "", password: "", credit_limit: 0, opening_balance: 0, address: "", notes: "", status: "active" });
+  const [f, setF] = useState(initial || { name: "", phone: "", password: "", credit_limit: 0, opening_balance: 0, address: "", notes: "", status: "active", customer_type: "customer" });
   const [loading, setLoading] = useState(false);
   const submit = async (e) => {
     e.preventDefault();
@@ -28,7 +29,15 @@ function CustomerForm({ initial, onSaved, onClose }) {
   };
   return (
     <form onSubmit={submit} className="space-y-3" data-testid="customer-form">
-      <div><Label>الاسم *</Label><Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required data-testid="cust-name" /></div>
+      <div className="grid grid-cols-2 gap-3">
+        <div><Label>الاسم *</Label><Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required data-testid="cust-name" /></div>
+        <div><Label>نوع الحساب</Label>
+          <Select value={f.customer_type || "customer"} onValueChange={(v) => setF({ ...f, customer_type: v })}>
+            <SelectTrigger data-testid="cust-type"><SelectValue/></SelectTrigger>
+            <SelectContent><SelectItem value="customer">عميل</SelectItem><SelectItem value="pos">نقطة بيع</SelectItem></SelectContent>
+          </Select>
+        </div>
+      </div>
       <div><Label>رقم الهاتف</Label><Input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} data-testid="cust-phone" /></div>
       {!initial?.id && <div><Label>كلمة السر (اتركها فارغة للتوليد)</Label><Input value={f.password || ""} onChange={(e) => setF({ ...f, password: e.target.value })} placeholder="JWDXXXXX" data-testid="cust-password" /></div>}
       <div className="grid grid-cols-2 gap-3">
@@ -68,27 +77,45 @@ function PasswordDialog({ customer, onClose, onSaved }) {
   );
 }
 
+function RevealButton({ id }) {
+  const [pwd, setPwd] = useState(null);
+  const reveal = async () => {
+    try { const r = await api.get(`/customers/${id}/password`); setPwd(r.data.password); setTimeout(() => setPwd(null), 6000); }
+    catch (e) { toast.error(errText(e)); }
+  };
+  return pwd ? <span className="font-mono text-xs bg-amber-100 px-2 py-1 rounded">{pwd}</span>
+             : <Button size="sm" variant="outline" onClick={reveal} data-testid={`cust-reveal-${id}`}><Eye size={12}/></Button>;
+}
+
 export default function Customers() {
   const [items, setItems] = useState([]);
   const [q, setQ] = useState("");
+  const [typeFilter, setTypeFilter] = useState("all");
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState(null);
   const [pwdCustomer, setPwdCustomer] = useState(null);
 
-  const load = async () => {
-    const r = await api.get("/customers");
-    setItems(r.data);
-  };
+  const load = async () => setItems((await api.get("/customers")).data);
   useEffect(() => { load(); }, []);
 
-  const filtered = items.filter((c) => !q || c.name.includes(q) || (c.phone || "").includes(q));
+  const filtered = items.filter((c) => (!q || c.name.includes(q) || (c.phone || "").includes(q)) && (typeFilter === "all" || (c.customer_type || "customer") === typeFilter));
 
   return (
     <div className="space-y-4" data-testid="customers-page">
       <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute right-3 top-2.5 text-slate-400" size={18} />
-          <Input placeholder="بحث بالاسم أو الهاتف..." value={q} onChange={(e) => setQ(e.target.value)} className="pr-10" data-testid="cust-search" />
+        <div className="flex gap-2 flex-1">
+          <div className="relative flex-1 max-w-md">
+            <Search className="absolute right-3 top-2.5 text-slate-400" size={18} />
+            <Input placeholder="بحث بالاسم أو الهاتف..." value={q} onChange={(e) => setQ(e.target.value)} className="pr-10" data-testid="cust-search" />
+          </div>
+          <Select value={typeFilter} onValueChange={setTypeFilter}>
+            <SelectTrigger className="w-36"><SelectValue/></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">الكل</SelectItem>
+              <SelectItem value="customer">عملاء</SelectItem>
+              <SelectItem value="pos">نقاط بيع</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
         <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setEdit(null); }}>
           <DialogTrigger asChild>
@@ -106,7 +133,7 @@ export default function Customers() {
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-slate-600">
               <tr className="text-right">
-                <th className="p-3">الاسم</th><th className="p-3">الهاتف</th><th className="p-3">السقف</th>
+                <th className="p-3">الاسم</th><th className="p-3">النوع</th><th className="p-3">الهاتف</th><th className="p-3">السقف</th>
                 <th className="p-3">المديونية</th><th className="p-3">المتاح</th><th className="p-3">كلمة السر</th><th className="p-3"></th>
               </tr>
             </thead>
@@ -114,11 +141,12 @@ export default function Customers() {
               {filtered.map((c) => (
                 <tr key={c.id} className="border-t border-slate-100" data-testid={`cust-row-${c.id}`}>
                   <td className="p-3 font-medium">{c.name}</td>
+                  <td className="p-3"><span className={`text-xs px-2 py-0.5 rounded-full ${(c.customer_type||'customer')==='pos'?'bg-purple-100 text-purple-700':'bg-blue-100 text-blue-700'}`}>{(c.customer_type||'customer')==='pos'?'نقطة بيع':'عميل'}</span></td>
                   <td className="p-3">{c.phone}</td>
                   <td className="p-3 num">{fmt(c.credit_limit)}</td>
                   <td className="p-3 num">{fmt(c.balance)}</td>
                   <td className="p-3 num text-green-700">{fmt(Math.max(0, (c.credit_limit || 0) - (c.balance || 0)))}</td>
-                  <td className="p-3 font-mono text-xs">••••••</td>
+                  <td className="p-3"><RevealButton id={c.id}/></td>
                   <td className="p-3 flex gap-2">
                     <Link to={`/customers/${c.id}`}><Button size="sm" variant="outline" data-testid={`cust-stmt-${c.id}`}><FileText size={14} /></Button></Link>
                     <Button size="sm" variant="outline" onClick={() => { setEdit(c); setOpen(true); }} data-testid={`cust-edit-${c.id}`}><Edit size={14} /></Button>
@@ -126,7 +154,7 @@ export default function Customers() {
                   </td>
                 </tr>
               ))}
-              {filtered.length === 0 && <tr><td colSpan={7} className="p-6 text-center text-slate-400">لا يوجد عملاء</td></tr>}
+              {filtered.length === 0 && <tr><td colSpan={8} className="p-6 text-center text-slate-400">لا يوجد عملاء</td></tr>}
             </tbody>
           </table>
         </div>
@@ -135,7 +163,7 @@ export default function Customers() {
             <div key={c.id} className="p-3">
               <div className="flex justify-between items-start">
                 <div>
-                  <div className="font-bold">{c.name}</div>
+                  <div className="font-bold">{c.name} <span className="text-xs text-slate-500">({(c.customer_type||'customer')==='pos'?'نقطة بيع':'عميل'})</span></div>
                   <div className="text-xs text-slate-500">{c.phone}</div>
                 </div>
                 <div className="flex gap-1">

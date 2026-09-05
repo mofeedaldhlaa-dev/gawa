@@ -70,9 +70,23 @@ html, body, #root { direction: rtl; }
 
 /* Print styles */
 @media print {
-  body { background: white; }
-  .no-print { display: none !important; }
+  body { background: white !important; }
+  .no-print, header, aside, .print-hide { display: none !important; }
+  main { margin: 0 !important; padding: 0 !important; }
   .print-only { display: block !important; }
+  @page { size: A4; margin: 15mm; }
+  table { page-break-inside: auto; }
+  tr { page-break-inside: avoid; page-break-after: auto; }
+  thead { display: table-header-group; }
+  .print-header {
+    text-align: center; padding-bottom: 12px;
+    border-bottom: 2px solid #221340; margin-bottom: 16px;
+  }
+  .print-footer {
+    position: fixed; bottom: 10mm; left: 0; right: 0;
+    text-align: center; font-size: 11px; color: #555;
+    border-top: 1px solid #ddd; padding-top: 4px;
+  }
 }
 .print-only { display: none; }
 

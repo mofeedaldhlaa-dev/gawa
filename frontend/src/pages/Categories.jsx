@@ -11,16 +11,19 @@ import { toast } from "sonner";
 import { fmt } from "@/lib/utils";
 import { Plus, Edit, Trash2 } from "lucide-react";
 
-const empty = { name: "", value: 0, sale_price: 0, purchase_price: 0, validity_days: 30, data_size: "", status: "active", notes: "", low_stock_threshold: 20 };
+const empty = { name: "", value: 0, sale_price: 0, sale_price_customer: 0, sale_price_pos: 0, purchase_price: 0, validity_days: 30, data_size: "", status: "active", notes: "", low_stock_threshold: 20, low_stock_numbered: 10, low_stock_quantity: 20 };
 
 function CategoryForm({ initial, onSaved, onClose }) {
-  const [f, setF] = useState(initial || empty);
+  const [f, setF] = useState(initial ? { ...empty, ...initial } : empty);
   const [loading, setLoading] = useState(false);
   const submit = async (e) => {
     e.preventDefault();
     setLoading(true);
     try {
-      const body = { ...f, value: Number(f.value), sale_price: Number(f.sale_price), purchase_price: Number(f.purchase_price), validity_days: Number(f.validity_days), low_stock_threshold: Number(f.low_stock_threshold) };
+      const body = { ...f };
+      ["value","sale_price","sale_price_customer","sale_price_pos","purchase_price","validity_days","low_stock_threshold","low_stock_numbered","low_stock_quantity"].forEach(k => body[k] = Number(body[k]) || 0);
+      // ensure sale_price fallback
+      if (!body.sale_price) body.sale_price = body.sale_price_customer || body.sale_price_pos || 0;
       if (initial?.id) await api.put(`/categories/${initial.id}`, body);
       else await api.post("/categories", body);
       toast.success("تم الحفظ"); onSaved(); onClose();
@@ -32,11 +35,13 @@ function CategoryForm({ initial, onSaved, onClose }) {
       <div><Label>اسم الفئة</Label><Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required data-testid="cat-name" /></div>
       <div className="grid grid-cols-2 gap-3">
         <div><Label>قيمة الكرت</Label><Input type="number" value={f.value} onChange={(e) => setF({ ...f, value: e.target.value })} data-testid="cat-value" /></div>
-        <div><Label>سعر البيع</Label><Input type="number" value={f.sale_price} onChange={(e) => setF({ ...f, sale_price: e.target.value })} data-testid="cat-sale" /></div>
         <div><Label>سعر الشراء</Label><Input type="number" value={f.purchase_price} onChange={(e) => setF({ ...f, purchase_price: e.target.value })} /></div>
+        <div><Label>سعر العملاء</Label><Input type="number" value={f.sale_price_customer} onChange={(e) => setF({ ...f, sale_price_customer: e.target.value, sale_price: e.target.value })} data-testid="cat-sale-cust" /></div>
+        <div><Label>سعر نقاط البيع</Label><Input type="number" value={f.sale_price_pos} onChange={(e) => setF({ ...f, sale_price_pos: e.target.value })} data-testid="cat-sale-pos" /></div>
         <div><Label>مدة الصلاحية (يوم)</Label><Input type="number" value={f.validity_days} onChange={(e) => setF({ ...f, validity_days: e.target.value })} /></div>
         <div><Label>حجم البيانات</Label><Input value={f.data_size} onChange={(e) => setF({ ...f, data_size: e.target.value })} /></div>
-        <div><Label>حد التنبيه</Label><Input type="number" value={f.low_stock_threshold} onChange={(e) => setF({ ...f, low_stock_threshold: e.target.value })} /></div>
+        <div><Label>حد تنبيه الكمية</Label><Input type="number" value={f.low_stock_quantity} onChange={(e) => setF({ ...f, low_stock_quantity: e.target.value })} /></div>
+        <div><Label>حد تنبيه المرقمة</Label><Input type="number" value={f.low_stock_numbered} onChange={(e) => setF({ ...f, low_stock_numbered: e.target.value })} /></div>
       </div>
       <Textarea placeholder="ملاحظات" value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} />
       <Button type="submit" disabled={loading} className="w-full bg-[#221340]" data-testid="cat-save">{loading?"جاري...":"حفظ"}</Button>
@@ -75,13 +80,13 @@ export default function Categories() {
                 <div className="font-bold text-lg text-[#221340]">{c.name}</div>
                 <div className="text-xs text-slate-500">{c.data_size} • {c.validity_days} يوم</div>
               </div>
-              <div className="text-left">
-                <div className="text-xs text-slate-500">البيع</div>
-                <div className="num font-bold gold-text">{fmt(c.sale_price)}</div>
+              <div className="text-left space-y-1">
+                <div className="text-xs">عميل: <span className="num font-bold gold-text">{fmt(c.sale_price_customer || c.sale_price)}</span></div>
+                <div className="text-xs">نقطة: <span className="num font-bold text-[#452480]">{fmt(c.sale_price_pos || c.sale_price)}</span></div>
               </div>
             </div>
             <div className="mt-3 pt-3 border-t border-slate-100 flex justify-between items-center text-xs">
-              <span className="text-slate-500">الشراء: <span className="num">{fmt(c.purchase_price)}</span></span>
+              <span className="text-slate-500">شراء: <span className="num">{fmt(c.purchase_price)}</span></span>
               <div className="flex gap-1">
                 <Button size="sm" variant="outline" onClick={() => { setEdit(c); setOpen(true); }} data-testid={`cat-edit-${c.id}`}><Edit size={12}/></Button>
                 <AlertDialog>

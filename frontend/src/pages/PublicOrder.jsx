@@ -7,8 +7,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { fmt, openWhatsApp, fmtDate } from "@/lib/utils";
-import { Wifi, CheckCircle, Copy, KeyRound, UserPlus, ArrowRight } from "lucide-react";
+import { fmt, openWhatsApp } from "@/lib/utils";
+import { Wifi, CheckCircle, Copy, KeyRound, Phone, Ban } from "lucide-react";
 
 const ADMIN_WHATSAPP = "784225716";
 
@@ -24,6 +24,8 @@ export default function PublicOrder() {
   const [showForgot, setShowForgot] = useState(false);
   const [showRegister, setShowRegister] = useState(false);
   const [showChangePwd, setShowChangePwd] = useState(false);
+  const [blocked, setBlocked] = useState(false);
+  const [selectedCat, setSelectedCat] = useState(null);
 
   const login = async () => {
     setLoading(true);
@@ -33,7 +35,10 @@ export default function PublicOrder() {
       const cr = await api.get("/public/card-order/categories");
       setCats(cr.data);
       toast.success(`مرحباً ${r.data.name}`);
-    } catch (e) { toast.error(errText(e)); }
+    } catch (e) {
+      if (e.response?.status === 429) { setBlocked(true); toast.error(errText(e)); }
+      else toast.error(errText(e));
+    }
     setLoading(false);
   };
 
@@ -43,6 +48,7 @@ export default function PublicOrder() {
     try {
       const r = await api.post("/public/card-order/request", { phone, password, category_id, quantity: Number(quantity) });
       setResult(r.data);
+      setSelectedCat(cats.find((c) => c.id === category_id));
       toast.success("تم تنفيذ طلبك بنجاح");
     } catch (e) { toast.error(errText(e)); }
     setLoading(false);
@@ -54,6 +60,24 @@ export default function PublicOrder() {
       toast.success("تم نسخ رقم الكرت بنجاح");
     } catch { toast.error("تعذر النسخ"); }
   };
+
+  const contactSupport = () => {
+    const msg = `مرحباً، تم حظر حسابي بسبب تجاوز عدد المحاولات الفاشلة.\nرقم الهاتف: ${phone}\nأرجو رفع الحظر عن حسابي.`;
+    openWhatsApp(ADMIN_WHATSAPP, msg);
+  };
+
+  if (blocked) {
+    return (
+      <div className="min-h-screen brand-gradient flex items-center justify-center p-4">
+        <Card className="w-full max-w-md p-6 bg-white text-center">
+          <Ban className="mx-auto text-red-500 mb-3" size={48}/>
+          <div className="font-bold text-lg">تم حظر الإدخال بسبب تجاوز عدد المحاولات الفاشلة.</div>
+          <div className="text-sm text-slate-600 mt-2">مدة الحظر: 24 ساعة</div>
+          <Button onClick={contactSupport} className="mt-4 bg-green-600 w-full" data-testid="contact-support"><Phone size={14} className="ml-1"/> التواصل مع خدمة العملاء</Button>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen brand-gradient flex items-center justify-center p-4" data-testid="public-order">
@@ -81,7 +105,10 @@ export default function PublicOrder() {
           <div className="space-y-3">
             <Card className="p-3 bg-slate-50">
               <div className="flex justify-between items-start">
-                <div className="font-bold">{customer.name}</div>
+                <div>
+                  <div className="font-bold">{customer.name}</div>
+                  <div className="text-xs text-slate-500">{customer.customer_type === "pos" ? "نقطة بيع" : "عميل"}</div>
+                </div>
                 <button onClick={() => setShowChangePwd(true)} className="text-xs text-[#452480] hover:underline flex items-center gap-1" data-testid="po-change-pwd"><KeyRound size={12}/> تغيير كلمة المرور</button>
               </div>
               <div className="text-xs mt-2 grid grid-cols-3 gap-2">
@@ -107,6 +134,7 @@ export default function PublicOrder() {
               <CheckCircle className="mx-auto text-green-500" size={48}/>
               <div className="font-bold text-lg mt-2">تم تنفيذ طلبك بنجاح</div>
             </div>
+            {selectedCat && <div className="text-center text-sm bg-slate-50 py-2 rounded">فئة الكرت: <span className="font-bold gold-text">{selectedCat.name}</span></div>}
             {result.cards?.length > 0 && (
               <Card className="p-3 bg-green-50">
                 <div className="text-sm font-bold mb-2">الكروت المطلوبة:</div>
@@ -125,22 +153,17 @@ export default function PublicOrder() {
               <div className="text-slate-500">المديونية بعد العملية</div>
               <div className="text-2xl font-bold num">{fmt(result.balance_after)}</div>
             </div>
-            <Button onClick={() => { setResult(null); setCategoryId(""); setQuantity(1); }} variant="outline" className="w-full">طلب جديد</Button>
+            <Button onClick={() => { setResult(null); setCategoryId(""); setQuantity(1); setSelectedCat(null); }} variant="outline" className="w-full">طلب جديد</Button>
           </div>
         )}
       </Card>
 
-      {/* Forgot Password Dialog */}
       <Dialog open={showForgot} onOpenChange={setShowForgot}>
         <ForgotPasswordForm onClose={() => setShowForgot(false)}/>
       </Dialog>
-
-      {/* Register Dialog */}
       <Dialog open={showRegister} onOpenChange={setShowRegister}>
         <RegisterForm onClose={() => setShowRegister(false)}/>
       </Dialog>
-
-      {/* Change Password Dialog */}
       <Dialog open={showChangePwd} onOpenChange={setShowChangePwd}>
         <ChangePasswordForm phone={phone} currentPassword={password} onClose={() => setShowChangePwd(false)} onDone={(np) => setPassword(np)}/>
       </Dialog>
@@ -198,7 +221,7 @@ function RegisterForm({ onClose }) {
       <form onSubmit={submit} className="space-y-3">
         <div><Label>الاسم الرباعي</Label><Input value={f.full_name} onChange={(e) => setF({...f, full_name: e.target.value})} required data-testid="reg-name"/></div>
         <div><Label>رقم الهاتف</Label><Input value={f.phone} onChange={(e) => setF({...f, phone: e.target.value})} required data-testid="reg-phone"/></div>
-        <div><Label>العنوان</Label><Input value={f.address} onChange={(e) => setF({...f, address: e.target.value})} data-testid="reg-address"/></div>
+        <div><Label>العنوان (عنوان العمل أو اسم محلك)</Label><Input value={f.address} onChange={(e) => setF({...f, address: e.target.value})} data-testid="reg-address" placeholder="عنوان العمل أو اسم المحل"/></div>
         <Button type="submit" disabled={loading} className="w-full bg-[#D4AF37] text-[#1A0F33] font-bold" data-testid="reg-submit">{loading?"جاري...":"إرسال الطلب للإدارة"}</Button>
       </form>
     </DialogContent>

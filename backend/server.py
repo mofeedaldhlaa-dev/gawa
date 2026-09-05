@@ -63,9 +63,13 @@ def random_password(length: int = 8) -> str:
 
 def clean_doc(doc: dict) -> dict:
     if not doc: return doc
-    doc = dict(doc)
-    doc.pop("_id", None)
-    return doc
+    def _strip(v):
+        if isinstance(v, dict):
+            return {k: _strip(x) for k, x in v.items() if k != "_id"}
+        if isinstance(v, list):
+            return [_strip(x) for x in v]
+        return v
+    return _strip(dict(doc))
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     if not credentials:
@@ -104,6 +108,18 @@ async def next_gwd_number() -> str:
     return f"GWD{val:04d}"
 
 async def audit_log(user: dict, action: str, entity: str, entity_id: str = "", old: Any = None, new: Any = None):
+    def _sanitize(v):
+        if v is None: return None
+        if isinstance(v, dict):
+            return {k: _sanitize(x) for k, x in v.items() if k != "_id"}
+        if isinstance(v, list):
+            return [_sanitize(x) for x in v]
+        try:
+            import json
+            json.dumps(v)
+            return v
+        except Exception:
+            return str(v)
     await db.audit_logs.insert_one({
         "id": str(uuid.uuid4()),
         "user_id": user.get("id"),
@@ -111,8 +127,8 @@ async def audit_log(user: dict, action: str, entity: str, entity_id: str = "", o
         "action": action,
         "entity": entity,
         "entity_id": entity_id,
-        "old_value": old,
-        "new_value": new,
+        "old_value": _sanitize(old),
+        "new_value": _sanitize(new),
         "created_at": now_iso(),
     })
 
@@ -157,6 +173,7 @@ class CustomerIn(BaseModel):
     address: Optional[str] = ""
     notes: Optional[str] = ""
     status: str = "active"
+    customer_type: str = "customer"  # customer / pos
 
 class SupplierIn(BaseModel):
     name: str
@@ -177,6 +194,10 @@ class CategoryIn(BaseModel):
     status: str = "active"
     notes: Optional[str] = ""
     low_stock_threshold: int = 20
+    sale_price_customer: Optional[float] = None
+    sale_price_pos: Optional[float] = None
+    low_stock_numbered: Optional[int] = None
+    low_stock_quantity: Optional[int] = None
 
 class CardsAddNumbersIn(BaseModel):
     category_id: str
@@ -192,6 +213,14 @@ class SaleItemIn(BaseModel):
     quantity: int
     price: float
     card_numbers: List[str] = []  # if selling numbered cards
+    use_numbered: bool = False
+
+class PurchaseItemIn(BaseModel):
+    category_id: str
+    category_name: Optional[str] = ""
+    quantity: int
+    price: float
+    card_numbers: List[str] = []
     use_numbered: bool = False
 
 class SaleIn(BaseModel):
@@ -600,6 +629,11 @@ async def customer_change_password(data: CustomerChangePwd):
         "action": "self_change_password", "entity": "customer", "entity_id": customer["id"],
         "created_at": now_iso(),
     })
+    await db.notifications.insert_one({
+        "id": str(uuid.uuid4()), "title": "تغيير كلمة المرور",
+        "message": f"قام العميل {customer.get('name','')} بتغيير كلمة المرور الخاصة به. الهاتف: {customer.get('phone','')}",
+        "type": "info", "read": False, "created_at": now_iso(),
+    })
     return {"ok": True}
 
 
@@ -736,6 +770,18 @@ async def create_sale(data: SaleIn, user=Depends(require_perm("sales"))):
             if limit > 0 and new_balance > limit:
                 raise HTTPException(status_code=400, detail=f"لا يمكن تنفيذ العملية لأنها تتجاوز سقف حساب العميل ({limit})")
 
+    # Auto-pricing based on customer_type if price not set explicitly per item
+    if customer:
+        ctype = customer.get("customer_type", "customer")
+        for i, item in enumerate(data.items):
+            if item.price <= 0:
+                cat = await db.card_categories.find_one({"id": item.category_id})
+                if cat:
+                    p = cat.get("sale_price_pos") if ctype == "pos" else cat.get("sale_price_customer")
+                    if p is None: p = cat.get("sale_price", 0)
+                    items_final[i]["price"] = p
+                    items_final[i]["total"] = items_final[i]["quantity"] * p
+
     # Reserve/mark cards (numbered) and quantity stock
     for item in data.items:
         if item.use_numbered and item.card_numbers:
@@ -845,18 +891,33 @@ async def create_purchase(data: PurchaseIn, user=Depends(require_perm("purchases
         line_total = item.quantity * item.price
         subtotal += line_total
         items_final.append({**item.model_dump(), "total": line_total})
-        # Add stock (quantity type)
         cat = await db.card_categories.find_one({"id": item.category_id})
         if not cat: continue
-        stock = await db.stock.find_one({"category_id": item.category_id})
-        if stock:
-            await db.stock.update_one({"category_id": item.category_id}, {"$inc": {"total": item.quantity}})
+        # If numbered cards provided, insert them into inventory
+        if item.use_numbered and item.card_numbers:
+            for n in item.card_numbers:
+                n = (n or "").strip()
+                if not n: continue
+                exists = await db.cards.find_one({"number": n})
+                if exists: continue  # skip duplicates silently
+                await db.cards.insert_one({
+                    "id": str(uuid.uuid4()), "number": n,
+                    "category_id": item.category_id, "category_name": cat.get("name"),
+                    "status": "available", "type": "numbered",
+                    "purchase_price": item.price,
+                    "supplier_id": data.supplier_id,
+                    "created_at": now_iso(), "created_by": user.get("username"),
+                })
         else:
-            await db.stock.insert_one({
-                "id": str(uuid.uuid4()), "category_id": item.category_id,
-                "category_name": cat.get("name"),
-                "total": item.quantity, "sold": 0, "used": 0, "created_at": now_iso(),
-            })
+            stock = await db.stock.find_one({"category_id": item.category_id})
+            if stock:
+                await db.stock.update_one({"category_id": item.category_id}, {"$inc": {"total": item.quantity}})
+            else:
+                await db.stock.insert_one({
+                    "id": str(uuid.uuid4()), "category_id": item.category_id,
+                    "category_name": cat.get("name"),
+                    "total": item.quantity, "sold": 0, "used": 0, "created_at": now_iso(),
+                })
     total = subtotal - (data.discount or 0)
     remaining = total - (data.paid or 0)
     number = await next_gwd_number()
@@ -929,6 +990,10 @@ async def list_receipts(user=Depends(require_perm("receipts"))):
 # ================= CARD ORDERS (PUBLIC) =================
 @api.post("/public/card-order/login")
 async def public_login(data: CardOrderPublicLogin):
+    # Rate limit: 5 failed in 24h => block
+    blocks = await db.public_blocks.find_one({"phone": data.phone})
+    if blocks and blocks.get("blocked_until") and blocks["blocked_until"] > now_iso():
+        raise HTTPException(status_code=429, detail=f"تم حظر الإدخال بسبب تجاوز عدد المحاولات الفاشلة. مدة الحظر: 24 ساعة")
     customer = await db.customers.find_one({"phone": data.phone})
     if not customer:
         await db.card_order_attempts.insert_one({
@@ -937,12 +1002,30 @@ async def public_login(data: CardOrderPublicLogin):
         })
         raise HTTPException(status_code=404, detail="لاتمتلك حساب بهذا الرقم، عليك بانشاء حساب أولاً")
     if customer.get("password") != data.password:
+        # increment failed counter
+        cur = await db.public_blocks.find_one({"phone": data.phone}) or {}
+        failed = cur.get("failed", 0) + 1
+        update = {"phone": data.phone, "failed": failed, "last_failed_at": now_iso()}
+        if failed >= 5:
+            block_until = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+            update["blocked_until"] = block_until
+            update["blocked_at"] = now_iso()
+            update["failed"] = 0
+            await db.notifications.insert_one({
+                "id": str(uuid.uuid4()), "title": "تم حظر عميل",
+                "message": f"تم حظر العميل {customer.get('name','')} ({data.phone}) بسبب تجاوز عدد المحاولات الفاشلة. مدة الحظر: 24 ساعة.",
+                "type": "warning", "read": False, "created_at": now_iso(),
+            })
+        await db.public_blocks.update_one({"phone": data.phone}, {"$set": update}, upsert=True)
         raise HTTPException(status_code=401, detail="كلمة السر غير صحيحة")
     if customer.get("status") == "disabled":
         raise HTTPException(status_code=403, detail="الحساب معطل")
+    # reset failed counter on success
+    await db.public_blocks.update_one({"phone": data.phone}, {"$set": {"failed": 0}}, upsert=True)
     return {
         "id": customer["id"], "name": customer["name"], "phone": customer["phone"],
         "credit_limit": customer.get("credit_limit", 0), "balance": customer.get("balance", 0),
+        "customer_type": customer.get("customer_type", "customer"),
         "available": max(0, customer.get("credit_limit", 0) - customer.get("balance", 0)),
     }
 
@@ -1119,6 +1202,7 @@ async def dashboard_stats(user=Depends(get_current_user)):
         "recent_sales": [clean_doc(s) for s in recent_sales],
         "recent_receipts": [clean_doc(r) for r in recent_receipts],
         "recent_orders": [clean_doc(o) for o in recent_orders],
+        "pending_register_requests": await db.register_requests.count_documents({"status": "pending"}),
         "chart": chart,
     }
 
@@ -1147,6 +1231,139 @@ async def report_customer_debts(user=Depends(require_perm("reports"))):
 async def report_supplier_debts(user=Depends(require_perm("reports"))):
     items = await db.suppliers.find().to_list(10000)
     return [clean_doc(s) for s in items if s.get("balance", 0) > 0]
+
+
+# ================= REGISTER REQUESTS =================
+@api.get("/register-requests")
+async def list_register_requests(user=Depends(require_perm("customers"))):
+    items = await db.register_requests.find().sort("created_at", -1).to_list(1000)
+    return [clean_doc(r) for r in items]
+
+class ApproveRegisterIn(BaseModel):
+    credit_limit: float = 0
+    customer_type: str = "customer"
+    password: Optional[str] = None
+
+@api.post("/register-requests/{rid}/approve")
+async def approve_register(rid: str, data: ApproveRegisterIn, user=Depends(require_perm("customers"))):
+    req = await db.register_requests.find_one({"id": rid})
+    if not req: raise HTTPException(status_code=404, detail="غير موجود")
+    if req.get("status") == "approved":
+        raise HTTPException(status_code=400, detail="تمت الموافقة مسبقاً")
+    # Check if phone already exists
+    exists = await db.customers.find_one({"phone": req["phone"]})
+    if exists:
+        await db.register_requests.update_one({"id": rid}, {"$set": {"status": "duplicate", "approved_at": now_iso()}})
+        raise HTTPException(status_code=400, detail="يوجد عميل بنفس الرقم")
+    doc = {
+        "id": str(uuid.uuid4()), "name": req["full_name"], "phone": req["phone"],
+        "address": req.get("address", ""), "password": data.password or random_password(),
+        "credit_limit": data.credit_limit, "opening_balance": 0, "balance": 0,
+        "notes": f"تمت الموافقة على طلب #{rid[:8]}", "status": "active",
+        "customer_type": data.customer_type,
+        "created_at": now_iso(), "created_by": user.get("username"),
+    }
+    await db.customers.insert_one(doc)
+    await db.register_requests.update_one({"id": rid}, {"$set": {"status": "approved", "approved_at": now_iso(), "customer_id": doc["id"]}})
+    await audit_log(user, "approve", "register_request", rid)
+    return {"ok": True, "customer": clean_doc(doc)}
+
+@api.post("/register-requests/{rid}/reject")
+async def reject_register(rid: str, user=Depends(require_perm("customers"))):
+    await db.register_requests.update_one({"id": rid}, {"$set": {"status": "rejected", "rejected_at": now_iso()}})
+    return {"ok": True}
+
+
+# ================= BLOCK MGMT =================
+@api.get("/public-blocks")
+async def list_blocks(user=Depends(require_perm("customers"))):
+    items = await db.public_blocks.find().to_list(1000)
+    return [clean_doc(b) for b in items]
+
+@api.post("/public-blocks/{phone}/unblock")
+async def unblock(phone: str, user=Depends(require_perm("customers"))):
+    await db.public_blocks.update_one({"phone": phone}, {"$set": {"failed": 0, "blocked_until": None, "unblocked_at": now_iso(), "unblocked_by": user.get("username")}})
+    await audit_log(user, "unblock", "customer", phone)
+    return {"ok": True}
+
+
+# ================= RESET DATA =================
+class ResetDataIn(BaseModel):
+    username: str
+    password: str
+    confirm: bool = False
+
+@api.post("/settings/reset-data")
+async def reset_data(data: ResetDataIn, user=Depends(require_perm("settings"))):
+    if not data.confirm:
+        raise HTTPException(status_code=400, detail="يجب التأكيد")
+    verify = await db.users.find_one({"username": data.username})
+    if not verify or not verify_password(data.password, verify.get("password_hash", "")):
+        raise HTTPException(status_code=401, detail="بيانات الاعتماد غير صحيحة")
+    if verify.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="يتطلب صلاحية المدير")
+    # Wipe everything except users, settings, invoice_sequences
+    collections_to_wipe = [
+        "customers", "suppliers", "card_categories", "cards", "stock",
+        "sales", "purchases", "receipts", "ledger", "orders", "notifications",
+        "audit_logs", "register_requests", "card_order_attempts", "public_blocks",
+    ]
+    for c in collections_to_wipe:
+        await db[c].delete_many({})
+    # Reset GWD counter
+    await db.settings.update_one({"key": "gwd_sequence"}, {"$set": {"value": 0}}, upsert=True)
+    await audit_log(user, "reset_all_data", "system", "", None, {"by": data.username})
+    return {"ok": True, "message": "تم مسح جميع البيانات"}
+
+
+# ================= BACKUP =================
+@api.get("/backup/export")
+async def backup_export(user=Depends(require_perm("backup"))):
+    from fastapi.encoders import jsonable_encoder
+    collections = ["customers","suppliers","card_categories","cards","stock","sales","purchases","receipts","ledger","orders","notifications","audit_logs","register_requests","card_order_attempts","public_blocks","users","settings"]
+    def _deep(v):
+        if isinstance(v, dict):
+            return {k: _deep(x) for k, x in v.items() if k != "_id"}
+        if isinstance(v, list):
+            return [_deep(x) for x in v]
+        return v
+    dump = {}
+    for c in collections:
+        docs = await db[c].find().to_list(50000)
+        dump[c] = [_deep(clean_doc(d)) for d in docs]
+    dump["_exported_at"] = now_iso()
+    return jsonable_encoder(dump, custom_encoder={bytes: lambda b: b.decode(errors="replace")})
+
+class BackupRestoreIn(BaseModel):
+    data: Dict[str, Any]
+
+@api.post("/backup/restore")
+async def backup_restore(payload: BackupRestoreIn, user=Depends(require_perm("backup"))):
+    # Snapshot current before restore
+    snapshot_id = str(uuid.uuid4())
+    snapshot = {}
+    collections = ["customers","suppliers","card_categories","cards","stock","sales","purchases","receipts","ledger","orders","notifications","audit_logs"]
+    for c in collections:
+        docs = await db[c].find().to_list(50000)
+        snapshot[c] = [clean_doc(d) for d in docs]
+    await db.backup_snapshots.insert_one({"id": snapshot_id, "data": snapshot, "created_at": now_iso(), "reason": "pre_restore"})
+    # Wipe & restore
+    data = payload.data
+    for c in collections:
+        if c in data:
+            await db[c].delete_many({})
+            if data[c]:
+                await db[c].insert_many(data[c])
+    await audit_log(user, "restore_backup", "system", snapshot_id)
+    return {"ok": True, "snapshot_id": snapshot_id}
+
+
+# ================= CUSTOMER PASSWORD REVEAL =================
+@api.get("/customers/{cid}/password")
+async def get_customer_password(cid: str, user=Depends(require_perm("customers"))):
+    c = await db.customers.find_one({"id": cid})
+    if not c: raise HTTPException(status_code=404)
+    return {"password": c.get("password", "")}
 
 
 # ================= SEARCH =================

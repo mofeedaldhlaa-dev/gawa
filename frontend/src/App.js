@@ -84,6 +84,14 @@ function Shell({ children }) {
 
   return (
     <div className="min-h-screen bg-[#F6F4FB] flex" data-testid="app-shell">
+      {/* Print header/footer */}
+      <div className="print-only print-header">
+        <div className="text-xl font-bold">شبكة جواد نت اللاسلكية</div>
+        <div className="text-sm">المخاء • 784225716</div>
+      </div>
+      <div className="print-only print-footer">
+        أنشأ الملف: {user?.name || user?.username || "-"} • {new Date().toLocaleString("en-GB")}
+      </div>
       {/* Sidebar Desktop */}
       <aside className="hidden md:flex fixed top-0 right-0 h-screen w-64 flex-col brand-gradient text-white z-30">
         <div className="p-5 border-b border-white/10">
@@ -158,10 +166,11 @@ function Shell({ children }) {
   );
 }
 
-function Guard({ children }) {
-  const { user } = useAuth();
+function Guard({ children, perm }) {
+  const { user, hasPerm } = useAuth();
   if (user === undefined) return <div className="min-h-screen flex items-center justify-center text-slate-500">جاري التحميل...</div>;
   if (user === null) return <Navigate to="/login" replace />;
+  if (perm && !hasPerm(perm)) return <Shell><div className="p-8 text-center text-slate-500">لا تملك صلاحية الوصول إلى هذه الصفحة</div></Shell>;
   return <Shell>{children}</Shell>;
 }
 
@@ -171,24 +180,24 @@ function AppRoutes() {
       <Route path="/login" element={<Login />} />
       <Route path="/order-card" element={<PublicOrder />} />
       <Route path="/order" element={<PublicOrder />} />
-      <Route path="/" element={<Guard><Dashboard /></Guard>} />
-      <Route path="/sales" element={<Guard><Sales /></Guard>} />
-      <Route path="/sales/new" element={<Guard><SaleForm /></Guard>} />
-      <Route path="/purchases" element={<Guard><Purchases /></Guard>} />
-      <Route path="/purchases/new" element={<Guard><PurchaseForm /></Guard>} />
-      <Route path="/customers" element={<Guard><Customers /></Guard>} />
-      <Route path="/customers/:id" element={<Guard><CustomerStatement /></Guard>} />
-      <Route path="/suppliers" element={<Guard><Suppliers /></Guard>} />
-      <Route path="/cards" element={<Guard><Cards /></Guard>} />
-      <Route path="/categories" element={<Guard><Categories /></Guard>} />
-      <Route path="/stock" element={<Guard><Stock /></Guard>} />
-      <Route path="/receipts" element={<Guard><Receipts /></Guard>} />
-      <Route path="/orders" element={<Guard><Orders /></Guard>} />
-      <Route path="/reports" element={<Guard><Reports /></Guard>} />
-      <Route path="/users" element={<Guard><UsersPage /></Guard>} />
+      <Route path="/" element={<Guard perm="dashboard"><Dashboard /></Guard>} />
+      <Route path="/sales" element={<Guard perm="sales"><Sales /></Guard>} />
+      <Route path="/sales/new" element={<Guard perm="sales"><SaleForm /></Guard>} />
+      <Route path="/purchases" element={<Guard perm="purchases"><Purchases /></Guard>} />
+      <Route path="/purchases/new" element={<Guard perm="purchases"><PurchaseForm /></Guard>} />
+      <Route path="/customers" element={<Guard perm="customers"><Customers /></Guard>} />
+      <Route path="/customers/:id" element={<Guard perm="customers"><CustomerStatement /></Guard>} />
+      <Route path="/suppliers" element={<Guard perm="suppliers"><Suppliers /></Guard>} />
+      <Route path="/cards" element={<Guard perm="cards"><Cards /></Guard>} />
+      <Route path="/categories" element={<Guard perm="categories"><Categories /></Guard>} />
+      <Route path="/stock" element={<Guard perm="stock"><Stock /></Guard>} />
+      <Route path="/receipts" element={<Guard perm="receipts"><Receipts /></Guard>} />
+      <Route path="/orders" element={<Guard perm="card_orders"><Orders /></Guard>} />
+      <Route path="/reports" element={<Guard perm="reports"><Reports /></Guard>} />
+      <Route path="/users" element={<Guard perm="users"><UsersPage /></Guard>} />
       <Route path="/notifications" element={<Guard><Notifications /></Guard>} />
-      <Route path="/audit" element={<Guard><AuditLog /></Guard>} />
-      <Route path="/settings" element={<Guard><SettingsPage /></Guard>} />
+      <Route path="/audit" element={<Guard perm="users"><AuditLog /></Guard>} />
+      <Route path="/settings" element={<Guard perm="settings"><SettingsPage /></Guard>} />
     </Routes>
   );
 }

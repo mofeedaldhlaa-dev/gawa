@@ -1,45 +1,47 @@
 # شبكة جواد نت اللاسلكية - PRD
 
-## Overview
-تطبيق محاسبة ومبيعات ومخزون متكامل عربي RTL. Owner: mofeedaldhlaa@gmail.com. Phone: 784225716.
+## Owner
+mofeedaldhlaa@gmail.com • Phone: 784225716 • Location: المخاء
 
 ## Stack
-FastAPI + MongoDB + React (RTL) + JWT (bcrypt) + IndexedDB offline + wa.me.
+FastAPI + MongoDB + React (RTL) + JWT (bcrypt admin) + IndexedDB offline + wa.me.
 
-## Delivered v1.1 (2026-02-04)
+## Delivered v1.2 (2026-02-05) — 46/46 backend tests pass
 ### Admin panel (behind /login):
-- JWT auth (admin/admin123), 17 granular permissions, user CRUD, audit log
-- Dashboard: 8 KPIs, sales chart, quick actions, recent sales/receipts/orders
-- Customers CRUD + edit + admin password reset dialog + credit limit enforcement + statement page
+- JWT auth (admin/admin123), 17 granular permissions, **route guards + hasPerm enforced on every URL**
+- Dashboard KPIs + chart + quick actions + recent invoices/receipts/orders + pending register requests
+- Customers: CRUD + **customer_type (عميل / نقطة بيع)** + password reveal + admin password reset + statement
 - Suppliers CRUD + statement
-- Categories: add/edit/delete (FK-safe soft-disable if used)
-- Cards: bulk-paste numbered (dedup/invalid report) + quantity-only + edit/delete (block edits on sold cards, soft-cancel on delete if sold)
-- Stock report with low-stock alerts (numbered + quantity views)
-- Sales: multi-item, cash/credit, numbered or qty, GWD auto-numbering, idempotency, credit-limit check, ledger update, WhatsApp share
-- Purchases with supplier ledger + stock replenish
-- Receipts (قبض/صرف) with ledger update
-- Reports: sales, purchases, electronic-sales (public_order source), card-order-log (with rejection tracking), customer/supplier debts, stock — with print
-- Notifications + Audit log + Settings
+- Categories: add/edit/delete (FK-safe) + **dual pricing (sale_price_customer + sale_price_pos)** + separate low_stock thresholds (numbered + quantity)
+- Cards: bulk-paste numbered / quantity / edit / delete (sold cards → soft-cancel)
+- Stock report with low-stock alerts
+- Sales: multi-item, cash/credit, numbered or qty, GWD auto-numbering, idempotency, credit-limit check, **auto-pricing based on customer_type**
+- **Purchases now support numbered cards** — adds cards to inventory on receipt
+- Receipts (قبض/صرف) with **success dialog: print + WhatsApp + close**; new WA format includes "من ... / المخاء / 784225716"
+- Reports: sales, purchases, electronic-sales, card-order-log (rejections tracked), customer/supplier debts, stock with print
+- Users mgmt with permissions
+- **Notifications** page includes register-request approve/reject with credit_limit + customer_type + optional password
+- Audit log (nested ObjectId fixed via recursive clean_doc)
+- **Settings**: general + Backup section (export/restore) + **Reset all data** with admin credential verification
 
 ### Public /order (independent, no admin UI):
-- Customer login (phone + password), auto card reservation
-- Forgot password → opens WhatsApp to 784225716 with pre-filled request
-- Create account → sends WhatsApp request to admin (does NOT auto-create)
-- Change own password (verify current)
-- Cards shown with copy button + toast
-- Balance after operation shown; invoice number hidden from customer
-- Rejection tracking: over-limit / no-stock / not-found (all logged in card_order_attempts)
+- Login with **rate limit: 5 failed = 24h block per phone** + support-contact button
+- Forgot password → WhatsApp to 784225716
+- Create account → WhatsApp request (label: "عنوان العمل أو اسم محلك")
+- Change own password (creates notification for admin)
+- Success screen: category name + card numbers + copy button + toast "تم نسخ رقم الكرت بنجاح"
 
-### Offline first:
-IndexedDB queue + sync button + online/offline indicator + idempotency keys.
+### Cross-cutting:
+- Print CSS hides sidebar/header, adds print header (Company + المخاء + phone) and footer with "أنشأ الملف: <username>"
+- Dialog max-h 90vh + overflow-y-auto for mobile
+- IndexedDB queue + sync button + online/offline indicator + idempotency keys
+- WhatsApp message format for invoices: "من ... / المخاء / 784225716 / عليكم فاتورة رقم: ..."
 
-## Backend test coverage: 29/29 PASSED (100%)
+## Test coverage: 46/46 backend tests PASSED (100%)
 
-## Deferred (v2 backlog):
-- Automatic daily backup + email delivery (Resend)
-- Backup upload/restore with pre-restore snapshot
-- Hash customer passwords with bcrypt (currently plaintext)
-- MongoDB transactions around multi-collection sale writes
-- Brute-force lockout on public login
-- Arabic PDF generation via server-side lib (currently uses browser print with RTL styles)
-- Explicit CORS origin whitelist (currently regex .*)
+## Deferred (v3 backlog):
+- Automatic daily backup email delivery (Resend)
+- bcrypt hash for customer passwords
+- MongoDB transactions on multi-collection writes
+- Server-side Arabic PDF via wkhtmltopdf/weasyprint (currently browser print)
+- Backup restore full-collection snapshot symmetry

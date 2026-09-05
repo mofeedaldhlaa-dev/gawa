@@ -57,18 +57,34 @@ export const openWhatsApp = (phone, text) => {
 export const buildInvoiceMessage = ({ company, number, kind, details, amount, discount, total, paid, remaining, balance_after }) => {
   const parts = [
     `من ${company}`,
+    `المخاء`,
+    `784225716`,
     ``,
-    `تم تسجيل عملية جديدة في حسابك.`,
+    `عليكم فاتورة رقم: ${number}`,
+    `تفاصيل الفاتورة:`,
+    details || "",
     ``,
-    `رقم العملية: ${number}`,
-    `نوع العملية: ${kind}`,
+    `مبلغ الفاتورة: ${fmt(total)}`,
   ];
-  if (details) parts.push(``, `التفاصيل:`, details);
-  parts.push(``, `المبلغ: ${fmt(amount)}`);
   if (discount > 0) parts.push(`الخصم: ${fmt(discount)}`);
-  parts.push(`الإجمالي: ${fmt(total)}`, `المدفوع: ${fmt(paid)}`, `المتبقي: ${fmt(remaining)}`);
+  if (paid !== undefined) parts.push(`المدفوع: ${fmt(paid)}`, `المتبقي: ${fmt(remaining)}`);
   if (balance_after !== null && balance_after !== undefined) {
-    parts.push(``, `الرصيد بعد العملية: ${fmt(balance_after)}`);
+    parts.push(``, `الرصيد الإجمالي عليكم: ${fmt(balance_after)}`);
   }
   return parts.join("\n");
+};
+
+export const buildReceiptMessage = ({ company, kind, number, amount, description }) => {
+  // kind: "receipt" (قبض من العميل → لكم) OR "payment" (صرف للمورد → عليكم)
+  const dir = kind === "receipt" ? "لكم" : "عليكم";
+  return [
+    `من ${company}`,
+    `المخاء`,
+    `784225716`,
+    ``,
+    `${dir} سند رقم: ${number}`,
+    `مبلغ السند: ${fmt(amount)}`,
+    `تفاصيل السند:`,
+    description || "-",
+  ].join("\n");
 };
