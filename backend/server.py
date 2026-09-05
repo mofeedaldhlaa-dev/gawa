@@ -877,6 +877,83 @@ async def cancel_sale(sid: str, user=Depends(require_perm("delete_ops"))):
     return {"ok": True}
 
 
+class SaleEditIn(BaseModel):
+    discount: Optional[float] = None
+    paid: Optional[float] = None
+    notes: Optional[str] = None
+
+@api.put("/sales/{sid}")
+async def edit_sale(sid: str, data: SaleEditIn, user=Depends(require_perm("edit_ops"))):
+    doc = await db.sales.find_one({"id": sid})
+    if not doc: raise HTTPException(status_code=404, detail="غير موجود")
+    if doc.get("status") != "active":
+        raise HTTPException(status_code=400, detail="لا يمكن تعديل فاتورة ملغاة")
+    subtotal = doc.get("subtotal", 0)
+    new_discount = data.discount if data.discount is not None else doc.get("discount", 0)
+    new_paid = data.paid if data.paid is not None else doc.get("paid", 0)
+    new_total = subtotal - new_discount
+    new_remaining = new_total - new_paid
+    old_remaining = doc.get("remaining", 0)
+    diff = new_remaining - old_remaining
+    if doc.get("customer_id") and diff != 0:
+        # Enforce credit limit
+        customer = await db.customers.find_one({"id": doc["customer_id"]})
+        if customer:
+            limit = customer.get("credit_limit", 0)
+            new_bal = customer.get("balance", 0) + diff
+            if limit > 0 and new_bal > limit:
+                raise HTTPException(status_code=400, detail="التعديل يتجاوز سقف حساب العميل")
+        await _adjust_party_balance("customer", doc["customer_id"], diff, doc["number"], f"تعديل فاتورة {doc['number']}")
+    update = {"discount": new_discount, "paid": new_paid, "total": new_total, "remaining": new_remaining,
+              "notes": data.notes if data.notes is not None else doc.get("notes"),
+              "edited_at": now_iso(), "edited_by": user.get("username")}
+    await db.sales.update_one({"id": sid}, {"$set": update})
+    await audit_log(user, "edit", "sale", sid, {"old": {"discount": doc.get("discount"), "paid": doc.get("paid")}}, update)
+    return {"ok": True}
+
+
+class ReceiptEditIn(BaseModel):
+    amount: Optional[float] = None
+    description: Optional[str] = None
+
+@api.put("/receipts/{rid}")
+async def edit_receipt(rid: str, data: ReceiptEditIn, user=Depends(require_perm("edit_ops"))):
+    doc = await db.receipts.find_one({"id": rid})
+    if not doc: raise HTTPException(status_code=404, detail="غير موجود")
+    old_amount = doc.get("amount", 0)
+    new_amount = data.amount if data.amount is not None else old_amount
+    diff = new_amount - old_amount
+    if diff != 0:
+        # receipts subtract from balance; increasing amount subtracts more (negative delta)
+        sign = -1 if doc.get("kind") in ("receipt", "payment") else 1
+        await _adjust_party_balance(doc["party_type"], doc["party_id"], sign * diff, doc["number"], f"تعديل سند {doc['number']}")
+    update = {"amount": new_amount,
+              "description": data.description if data.description is not None else doc.get("description"),
+              "edited_at": now_iso(), "edited_by": user.get("username")}
+    await db.receipts.update_one({"id": rid}, {"$set": update})
+    await audit_log(user, "edit", "receipt", rid, {"old_amount": old_amount}, {"new_amount": new_amount})
+    return {"ok": True}
+
+
+# List customers with blocked info
+@api.get("/customers/blocked/list")
+async def blocked_customers(user=Depends(require_perm("customers"))):
+    now = now_iso()
+    blocks = await db.public_blocks.find({"blocked_until": {"$gt": now}}).to_list(1000)
+    result = []
+    for b in blocks:
+        cust = await db.customers.find_one({"phone": b.get("phone")})
+        result.append({
+            "phone": b.get("phone"),
+            "customer_name": (cust or {}).get("name", "غير معروف"),
+            "customer_id": (cust or {}).get("id"),
+            "failed_before_block": 5,
+            "blocked_at": b.get("blocked_at"),
+            "blocked_until": b.get("blocked_until"),
+        })
+    return result
+
+
 # ================= PURCHASES =================
 @api.post("/purchases")
 async def create_purchase(data: PurchaseIn, user=Depends(require_perm("purchases"))):

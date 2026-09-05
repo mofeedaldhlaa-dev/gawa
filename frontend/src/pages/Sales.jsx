@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import api from "@/lib/api";
+import api, { errText } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,6 +7,7 @@ import { Link } from "react-router-dom";
 import { fmt, fmtDate, openWhatsApp, buildInvoiceMessage } from "@/lib/utils";
 import { Plus, Search, Printer, MessageCircle, Eye } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 
 export default function Sales() {
@@ -14,13 +15,22 @@ export default function Sales() {
   const [customers, setCustomers] = useState([]);
   const [q, setQ] = useState("");
   const [viewing, setViewing] = useState(null);
+  const [editing, setEditing] = useState(null);
   const [settings, setSettings] = useState({ company_name: "شبكة جواد نت اللاسلكية" });
 
+  const load = () => api.get("/sales", { params: { q } }).then((r) => setItems(r.data));
   useEffect(() => {
-    api.get("/sales", { params: { q } }).then((r) => setItems(r.data));
+    load();
     api.get("/customers").then((r) => setCustomers(r.data));
     api.get("/settings").then((r) => setSettings(r.data));
   }, [q]);
+
+  const saveEdit = async () => {
+    try {
+      await api.put(`/sales/${editing.id}`, { discount: Number(editing.discount), paid: Number(editing.paid), notes: editing.notes });
+      toast.success("تم التعديل"); setEditing(null); load();
+    } catch (e) { toast.error(errText(e)); }
+  };
 
   const sendWA = (s) => {
     const cust = customers.find((c) => c.id === s.customer_id);
@@ -54,6 +64,7 @@ export default function Sales() {
                 <td className="p-3 num font-bold text-amber-700">{fmt(s.remaining)}</td>
                 <td className="p-3 no-print flex gap-1">
                   <Button size="sm" variant="outline" onClick={() => setViewing(s)} data-testid={`sale-view-${s.id}`}><Eye size={12}/></Button>
+                  <Button size="sm" variant="outline" onClick={() => setEditing({ id: s.id, discount: s.discount, paid: s.paid, notes: s.notes || "" })} data-testid={`sale-edit-${s.id}`}>تعديل</Button>
                   <Button size="sm" variant="outline" onClick={() => { setViewing(s); setTimeout(() => window.print(), 300); }} data-testid={`sale-print-${s.id}`}><Printer size={12}/></Button>
                   <Button size="sm" variant="outline" onClick={() => sendWA(s)} data-testid={`sale-wa-${s.id}`}><MessageCircle size={12} className="text-green-600"/></Button>
                 </td>
@@ -86,6 +97,19 @@ export default function Sales() {
                 <Button onClick={() => window.print()} className="bg-[#221340] flex-1"><Printer size={14} className="ml-1"/> طباعة</Button>
                 <Button onClick={() => sendWA(viewing)} variant="outline" className="border-green-600 text-green-700 flex-1"><MessageCircle size={14} className="ml-1"/> واتساب</Button>
               </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+      <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>تعديل الفاتورة</DialogTitle></DialogHeader>
+          {editing && (
+            <div className="space-y-3">
+              <div><Label>الخصم</Label><Input type="number" value={editing.discount} onChange={(e) => setEditing({ ...editing, discount: e.target.value })} data-testid="edit-sale-discount"/></div>
+              <div><Label>المدفوع</Label><Input type="number" value={editing.paid} onChange={(e) => setEditing({ ...editing, paid: e.target.value })} data-testid="edit-sale-paid"/></div>
+              <div><Label>ملاحظات</Label><Input value={editing.notes} onChange={(e) => setEditing({ ...editing, notes: e.target.value })}/></div>
+              <Button onClick={saveEdit} className="w-full bg-[#221340]" data-testid="edit-sale-save">حفظ التعديل</Button>
             </div>
           )}
         </DialogContent>

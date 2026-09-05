@@ -30,7 +30,30 @@ import Notifications from "@/pages/Notifications";
 import AuditLog from "@/pages/AuditLog";
 import SettingsPage from "@/pages/Settings";
 import PublicOrder from "@/pages/PublicOrder";
+import BlockedCustomers from "@/pages/BlockedCustomers";
 import "@/index.css";
+import api from "@/lib/api";
+
+function NotificationBell() {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    const fetch = async () => {
+      try {
+        const r = await api.get("/notifications");
+        setCount((r.data || []).filter((n) => !n.read).length);
+      } catch {}
+    };
+    fetch();
+    const id = setInterval(fetch, 30000);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <Link to="/notifications" className="relative p-2 hover:bg-slate-100 rounded" data-testid="bell-btn">
+      <Bell size={18} className="text-[#452480]" />
+      {count > 0 && <span className="absolute -top-0.5 -left-0.5 bg-red-500 text-white text-[10px] rounded-full min-w-[16px] h-4 px-1 flex items-center justify-center font-bold">{count}</span>}
+    </Link>
+  );
+}
 
 const menu = [
   { path: "/", label: "لوحة التحكم", icon: LayoutDashboard, perm: "dashboard" },
@@ -45,6 +68,7 @@ const menu = [
   { path: "/orders", label: "طلبات الكروت", icon: Ticket, perm: "card_orders" },
   { path: "/reports", label: "التقارير", icon: BarChart3, perm: "reports" },
   { path: "/users", label: "المستخدمون", icon: UserCog, perm: "users" },
+  { path: "/blocked", label: "العملاء المحظورون", icon: Bell, perm: "customers" },
   { path: "/notifications", label: "الإشعارات", icon: Bell, perm: "dashboard" },
   { path: "/audit", label: "سجل العمليات", icon: ScrollText, perm: "users" },
   { path: "/settings", label: "الإعدادات", icon: Settings, perm: "settings" },
@@ -156,6 +180,7 @@ function Shell({ children }) {
                 {online ? "متصل" : "غير متصل"}
                 {pending > 0 && <span className="mr-1 bg-amber-500 text-white rounded-full px-1.5">{pending}</span>}
               </button>
+              <NotificationBell />
               <div className="text-sm text-slate-600 hidden sm:block">{user?.name}</div>
             </div>
           </div>
@@ -197,7 +222,9 @@ function AppRoutes() {
       <Route path="/users" element={<Guard perm="users"><UsersPage /></Guard>} />
       <Route path="/notifications" element={<Guard><Notifications /></Guard>} />
       <Route path="/audit" element={<Guard perm="users"><AuditLog /></Guard>} />
+      <Route path="/blocked" element={<Guard perm="customers"><BlockedCustomers /></Guard>} />
       <Route path="/settings" element={<Guard perm="settings"><SettingsPage /></Guard>} />
+      <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
   );
 }

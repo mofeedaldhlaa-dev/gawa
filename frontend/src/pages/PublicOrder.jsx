@@ -83,9 +83,8 @@ export default function PublicOrder() {
     <div className="min-h-screen brand-gradient flex items-center justify-center p-4" data-testid="public-order">
       <Card className="w-full max-w-md p-6 bg-white">
         <div className="text-center mb-6">
-          <Wifi className="mx-auto mb-2 text-[#D4AF37]" size={40}/>
           <div className="text-xl font-black text-[#221340]">شبكة جواد نت اللاسلكية</div>
-          <div className="text-xs text-slate-500">طلب كرت • 784225716</div>
+          <div className="mt-4 inline-block bg-[#D4AF37] text-[#1A0F33] px-6 py-2 rounded-lg font-bold text-lg">طلب كرت</div>
         </div>
 
         {!customer && (

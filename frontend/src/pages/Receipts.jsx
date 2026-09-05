@@ -22,6 +22,7 @@ export default function Receipts() {
   const [customers, setCustomers] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
   const [saved, setSaved] = useState(null);
+  const [editing, setEditing] = useState(null);
   const [settings, setSettings] = useState({ company_name: "شبكة جواد نت اللاسلكية" });
 
   const load = async () => setItems((await api.get("/receipts")).data);
@@ -31,6 +32,13 @@ export default function Receipts() {
     api.get("/suppliers").then((r) => setSuppliers(r.data));
     api.get("/settings").then((r) => setSettings(r.data));
   }, []);
+
+  const saveEdit = async () => {
+    try {
+      await api.put(`/receipts/${editing.id}`, { amount: Number(editing.amount), description: editing.description });
+      toast.success("تم التعديل"); setEditing(null); load();
+    } catch (e) { toast.error(errText(e)); }
+  };
 
   const parties = partyType === "customer" ? customers : suppliers;
   const party = parties.find((p) => p.id === partyId);
@@ -114,6 +122,20 @@ export default function Receipts() {
         </DialogContent>
       </Dialog>
 
+      {/* Edit Dialog */}
+      <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>تعديل السند</DialogTitle></DialogHeader>
+          {editing && (
+            <div className="space-y-3">
+              <div><Label>المبلغ</Label><Input type="number" value={editing.amount} onChange={(e) => setEditing({ ...editing, amount: e.target.value })} data-testid="edit-rec-amount"/></div>
+              <div><Label>البيان</Label><Textarea value={editing.description} onChange={(e) => setEditing({ ...editing, description: e.target.value })}/></div>
+              <Button onClick={saveEdit} className="w-full bg-[#221340]" data-testid="edit-rec-save">حفظ التعديل</Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
       <Card className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-50"><tr className="text-right"><th className="p-3">الرقم</th><th className="p-3">التاريخ</th><th className="p-3">النوع</th><th className="p-3">الطرف</th><th className="p-3">المبلغ</th><th className="p-3">الرصيد بعد</th><th></th></tr></thead>
@@ -130,6 +152,7 @@ export default function Receipts() {
                   <td className="p-3 num">{fmt(r.balance_after)}</td>
                   <td className="p-3 no-print flex gap-1">
                     <Button size="sm" variant="outline" onClick={() => setSaved({ ...r, party_phone: p?.phone })}><MessageCircle size={12}/></Button>
+                    <Button size="sm" variant="outline" onClick={() => setEditing({ id: r.id, amount: r.amount, description: r.description || "" })} data-testid={`rec-edit-${r.id}`}>تعديل</Button>
                   </td>
                 </tr>
               );
