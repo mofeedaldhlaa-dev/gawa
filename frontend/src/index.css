@@ -1,0 +1,88 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: 'Tajawal', 'Cairo', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  background: #F6F4FB;
+  color: #1A0F33;
+}
+
+html, body, #root { direction: rtl; }
+
+@layer base {
+  :root {
+    --background: 250 33% 97%;
+    --foreground: 265 55% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 265 55% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 265 55% 12%;
+    --primary: 265 55% 23%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 250 33% 94%;
+    --secondary-foreground: 265 55% 15%;
+    --muted: 250 20% 93%;
+    --muted-foreground: 265 15% 40%;
+    --accent: 44 65% 52%;
+    --accent-foreground: 265 55% 12%;
+    --destructive: 0 74% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 250 20% 88%;
+    --input: 250 20% 88%;
+    --ring: 265 55% 30%;
+    --radius: 0.75rem;
+    --chart-1: 265 55% 30%;
+    --chart-2: 44 65% 52%;
+    --chart-3: 300 40% 40%;
+    --chart-4: 200 60% 45%;
+    --chart-5: 340 60% 55%;
+  }
+}
+
+@layer base {
+  * { @apply border-border; }
+  body { @apply bg-background text-foreground; font-feature-settings: "kern"; }
+}
+
+/* Brand colors */
+.brand-gradient { background: linear-gradient(135deg, #1A0F33 0%, #311B5C 60%, #452480 100%); }
+.gold-text { color: #D4AF37; }
+.gold-bg { background-color: #D4AF37; }
+.card-elevated {
+  background: white;
+  box-shadow: 0 1px 3px rgba(26,15,51,0.04), 0 4px 20px rgba(26,15,51,0.06);
+  border: 1px solid rgba(212,175,55,0.15);
+}
+
+/* Numbers use tabular figures */
+.num { font-variant-numeric: tabular-nums; font-family: 'Cairo', 'Tajawal', monospace; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #d1c9e0; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #a89bc8; }
+
+/* RTL fixes */
+[dir="rtl"] .lucide { direction: ltr; }
+
+/* Print styles */
+@media print {
+  body { background: white; }
+  .no-print { display: none !important; }
+  .print-only { display: block !important; }
+}
+.print-only { display: none; }
+
+/* Animations */
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.shimmer {
+  background: linear-gradient(90deg, transparent, rgba(212,175,55,0.15), transparent);
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+}
