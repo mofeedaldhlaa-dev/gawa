@@ -5,13 +5,17 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { fmt, fmtDate } from "@/lib/utils";
 import { Printer } from "lucide-react";
+import { printStatement } from "@/lib/print";
+import { useAuth } from "@/lib/auth";
 
 export default function CustomerStatement() {
   const { id } = useParams();
+  const { user } = useAuth();
   const [data, setData] = useState(null);
   useEffect(() => { api.get(`/customers/${id}/statement`).then((r) => setData(r.data)); }, [id]);
   if (!data) return <div>جاري التحميل...</div>;
   const c = data.customer;
+  const doPrint = () => printStatement({ customer: c, entries: data.entries, username: user?.name || user?.username });
   return (
     <div className="space-y-4" data-testid="statement-page">
       <Card className="p-4 md:p-6">
@@ -20,11 +24,11 @@ export default function CustomerStatement() {
             <h2 className="text-xl font-bold">{c.name}</h2>
             <div className="text-slate-500 text-sm">{c.phone}</div>
           </div>
-          <Button onClick={() => window.print()} className="bg-[#221340]" data-testid="print-stmt"><Printer size={16} className="ml-1"/> طباعة</Button>
+          <Button onClick={doPrint} className="bg-[#221340]" data-testid="print-stmt"><Printer size={16} className="ml-1"/> طباعة كشف الحساب</Button>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
           <div className="bg-slate-50 p-3 rounded-lg"><div className="text-xs text-slate-500">السقف</div><div className="num font-bold">{fmt(c.credit_limit)}</div></div>
-          <div className="bg-slate-50 p-3 rounded-lg"><div className="text-xs text-slate-500">الرصيد</div><div className="num font-bold">{fmt(c.balance)}</div></div>
+          <div className="bg-slate-50 p-3 rounded-lg"><div className="text-xs text-slate-500">المديونية</div><div className="num font-bold">{fmt(c.balance)}</div></div>
           <div className="bg-slate-50 p-3 rounded-lg"><div className="text-xs text-slate-500">المتاح</div><div className="num font-bold text-green-600">{fmt(Math.max(0, (c.credit_limit || 0) - (c.balance || 0)))}</div></div>
           <div className="bg-slate-50 p-3 rounded-lg"><div className="text-xs text-slate-500">الرصيد الافتتاحي</div><div className="num font-bold">{fmt(c.opening_balance)}</div></div>
         </div>
@@ -48,7 +52,7 @@ export default function CustomerStatement() {
                 <td className="p-3 num font-bold">{fmt(e.balance)}</td>
               </tr>
             ))}
-            {data.entries.length === 0 && <tr><td colSpan={6} className="p-6 text-center text-slate-400">لا توجد حركات</td></tr>}
+            {data.entries.length === 0 && <tr><td colSpan={6} className="p-6 text-center text-slate-400">لا توجد بيانات لعرضها</td></tr>}
           </tbody>
         </table>
       </Card>

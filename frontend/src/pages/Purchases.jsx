@@ -9,14 +9,23 @@ import { Link } from "react-router-dom";
 import { fmt, fmtDate } from "@/lib/utils";
 import { Plus, Printer, Eye } from "lucide-react";
 import { toast } from "sonner";
+import { printPurchase } from "@/lib/print";
+import { useAuth } from "@/lib/auth";
 
 export default function Purchases() {
+  const { user } = useAuth();
   const [items, setItems] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
   const [viewing, setViewing] = useState(null);
   const [editing, setEditing] = useState(null);
 
   const load = () => api.get("/purchases").then((r) => setItems(r.data));
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); api.get("/suppliers").then((r) => setSuppliers(r.data)); }, []);
+
+  const doPrint = (p) => {
+    const supplier = suppliers.find((s) => s.id === p.supplier_id);
+    printPurchase({ purchase: p, supplier, username: user?.name || user?.username });
+  };
 
   const saveEdit = async () => {
     try {
@@ -43,7 +52,7 @@ export default function Purchases() {
                 <td className="p-3 no-print flex gap-1">
                   <Button size="sm" variant="outline" onClick={() => setViewing(p)} data-testid={`purch-view-${p.id}`}><Eye size={12}/></Button>
                   <Button size="sm" variant="outline" onClick={() => setEditing({ id: p.id, discount: p.discount, paid: p.paid, notes: p.notes || "" })} data-testid={`purch-edit-${p.id}`}>تعديل</Button>
-                  <Button size="sm" variant="outline" onClick={() => { setViewing(p); setTimeout(() => window.print(), 300); }} data-testid={`purch-print-${p.id}`}><Printer size={12}/></Button>
+                  <Button size="sm" variant="outline" onClick={() => doPrint(p)} data-testid={`purch-print-${p.id}`}><Printer size={12}/></Button>
                 </td>
               </tr>
             ))}
@@ -70,7 +79,7 @@ export default function Purchases() {
                 <div className="flex justify-between"><span>المدفوع</span><span className="num">{fmt(viewing.paid)}</span></div>
                 <div className="flex justify-between"><span>المتبقي</span><span className="num font-bold text-amber-700">{fmt(viewing.remaining)}</span></div>
               </div>
-              <Button onClick={() => window.print()} className="bg-[#221340] w-full mt-2"><Printer size={14} className="ml-1"/> طباعة</Button>
+              <Button onClick={() => doPrint(viewing)} className="bg-[#221340] w-full mt-2"><Printer size={14} className="ml-1"/> طباعة</Button>
             </div>
           )}
         </DialogContent>

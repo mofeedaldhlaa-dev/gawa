@@ -9,9 +9,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { fmt, fmtDate, genUUID, openWhatsApp, buildReceiptMessage } from "@/lib/utils";
+import { printReceipt } from "@/lib/print";
+import { useAuth } from "@/lib/auth";
 import { Plus, Printer, MessageCircle, X } from "lucide-react";
 
 export default function Receipts() {
+  const { user } = useAuth();
   const [items, setItems] = useState([]);
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState("receipt");
@@ -114,7 +117,7 @@ export default function Receipts() {
                 {saved.description && <div className="text-slate-600 text-xs pt-2 border-t">{saved.description}</div>}
               </div>
               <div className="flex gap-2 flex-wrap">
-                <Button onClick={() => window.print()} className="bg-[#221340] flex-1" data-testid="rec-print"><Printer size={14} className="ml-1"/> طباعة</Button>
+                <Button onClick={() => printReceipt({ receipt: saved, party: (saved.party_type==="customer"?customers:suppliers).find((p) => p.id === saved.party_id) || { phone: saved.party_phone }, username: user?.name || user?.username })} className="bg-[#221340] flex-1" data-testid="rec-print"><Printer size={14} className="ml-1"/> طباعة</Button>
                 <Button onClick={sendWA} variant="outline" className="border-green-600 text-green-700 flex-1" data-testid="rec-wa"><MessageCircle size={14} className="ml-1"/> واتساب</Button>
                 <Button onClick={() => { setSaved(null); setOpen(false); }} variant="outline"><X size={14}/> إغلاق</Button>
               </div>
@@ -153,6 +156,7 @@ export default function Receipts() {
                   <td className="p-3 num">{fmt(r.balance_after)}</td>
                   <td className="p-3 no-print flex gap-1">
                     <Button size="sm" variant="outline" onClick={() => setSaved({ ...r, party_phone: p?.phone })}><MessageCircle size={12}/></Button>
+                    <Button size="sm" variant="outline" onClick={() => printReceipt({ receipt: r, party: p, username: user?.name || user?.username })} data-testid={`rec-print-${r.id}`}><Printer size={12}/></Button>
                     <Button size="sm" variant="outline" onClick={() => setEditing({ id: r.id, amount: r.amount, description: r.description || "" })} data-testid={`rec-edit-${r.id}`}>تعديل</Button>
                   </td>
                 </tr>

@@ -5,12 +5,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Link } from "react-router-dom";
 import { fmt, fmtDate, openWhatsApp, buildInvoiceMessage } from "@/lib/utils";
+import { printSaleInvoice } from "@/lib/print";
+import { useAuth } from "@/lib/auth";
 import { Plus, Search, Printer, MessageCircle, Eye } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 
 export default function Sales() {
+  const { user } = useAuth();
   const [items, setItems] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [q, setQ] = useState("");
@@ -24,6 +27,11 @@ export default function Sales() {
     api.get("/customers").then((r) => setCustomers(r.data));
     api.get("/settings").then((r) => setSettings(r.data));
   }, [q]);
+
+  const doPrint = (s) => {
+    const customer = customers.find((c) => c.id === s.customer_id);
+    printSaleInvoice({ sale: s, customer, username: user?.name || user?.username });
+  };
 
   const saveEdit = async () => {
     try {
@@ -65,7 +73,7 @@ export default function Sales() {
                 <td className="p-3 no-print flex gap-1">
                   <Button size="sm" variant="outline" onClick={() => setViewing(s)} data-testid={`sale-view-${s.id}`}><Eye size={12}/></Button>
                   <Button size="sm" variant="outline" onClick={() => setEditing({ id: s.id, discount: s.discount, paid: s.paid, notes: s.notes || "" })} data-testid={`sale-edit-${s.id}`}>تعديل</Button>
-                  <Button size="sm" variant="outline" onClick={() => { setViewing(s); setTimeout(() => window.print(), 300); }} data-testid={`sale-print-${s.id}`}><Printer size={12}/></Button>
+                  <Button size="sm" variant="outline" onClick={() => doPrint(s)} data-testid={`sale-print-${s.id}`}><Printer size={12}/></Button>
                   <Button size="sm" variant="outline" onClick={() => sendWA(s)} data-testid={`sale-wa-${s.id}`}><MessageCircle size={12} className="text-green-600"/></Button>
                 </td>
               </tr>
@@ -94,7 +102,7 @@ export default function Sales() {
                 <div className="flex justify-between"><span>المتبقي</span><span className="num font-bold text-amber-700">{fmt(viewing.remaining)}</span></div>
               </div>
               <div className="flex gap-2 pt-2">
-                <Button onClick={() => window.print()} className="bg-[#221340] flex-1"><Printer size={14} className="ml-1"/> طباعة</Button>
+                <Button onClick={() => doPrint(viewing)} className="bg-[#221340] flex-1"><Printer size={14} className="ml-1"/> طباعة</Button>
                 <Button onClick={() => sendWA(viewing)} variant="outline" className="border-green-600 text-green-700 flex-1"><MessageCircle size={14} className="ml-1"/> واتساب</Button>
               </div>
             </div>

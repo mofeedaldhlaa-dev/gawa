@@ -149,7 +149,6 @@ export default function SaleForm() {
         <div className="flex gap-2 flex-wrap">
           <Button onClick={submit} disabled={loading} className="bg-[#221340]" data-testid="sale-save"><Save size={16} className="ml-1"/> {loading ? "جاري..." : "حفظ الفاتورة"}</Button>
           {saved && <Button onClick={sendWhatsApp} variant="outline" className="border-green-600 text-green-700" data-testid="sale-wa"><MessageCircle size={16} className="ml-1"/> إرسال واتساب</Button>}
-          {saved && <Button onClick={() => window.print()} variant="outline">طباعة</Button>}
         </div>
         {saved && <div className="p-3 bg-green-50 border border-green-200 rounded" data-testid="sale-success">تم إنشاء الفاتورة <span className="font-mono font-bold">{saved.number}</span></div>}
       </Card>
