@@ -11,12 +11,28 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// Determine if a request/URL belongs to the isolated customer portal (public/*)
+const isPublicRequest = (error) => {
+  const url = error?.config?.url || "";
+  return url.includes("/public/");
+};
+
+// Determine if the current page is the customer portal, so we never redirect
+// customers to the admin login on auth errors.
+const isCustomerPortalPage = () => {
+  const p = window.location.pathname || "";
+  return p === "/order" || p === "/order-card" || p.startsWith("/order/") || p.startsWith("/order-card/");
+};
+
 api.interceptors.response.use(
   (r) => r,
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem("jwd_token");
-      if (!window.location.pathname.includes("/login") && !window.location.pathname.includes("/order-card")) {
+      // Only redirect to admin login for ADMIN requests from ADMIN pages.
+      // Customer-portal requests (/public/*) and pages (/order, /order-card)
+      // must handle errors locally without any redirect.
+      if (!isPublicRequest(error) && !isCustomerPortalPage() && !window.location.pathname.includes("/login")) {
+        localStorage.removeItem("jwd_token");
         window.location.href = "/login";
       }
     }

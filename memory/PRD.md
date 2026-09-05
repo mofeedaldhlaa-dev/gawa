@@ -5,6 +5,14 @@ Owner: mofeedaldhlaa@gmail.com • 784225716 • المخاء
 ## Stack
 FastAPI + MongoDB + React (RTL) + JWT + IndexedDB + wa.me
 
+## Delivered v1.6 (2026-02-05) — Customer/Admin auth isolation
+- Root cause: `api.js` interceptor redirected ANY 401 to `/login`; the guard only excluded `/order-card` so `/order` was leaking failed customer logins to the admin login page.
+- Fix (frontend only, no backend change):
+  - `/app/frontend/src/lib/api.js`: interceptor now skips redirect when (a) the failing request is a `/public/*` endpoint OR (b) the current pathname is `/order`, `/order-card`, or sub-paths.
+  - `/app/frontend/src/pages/PublicOrder.jsx`: login form wrapped in `<form onSubmit>`, new `loginError` state renders inline red alert with `data-testid=po-login-error` ("كلمة المرور غير صحيحة" for 401, generic message for 404) — never navigates.
+- Backend `/api/public/card-order/login` unchanged: 401 wrong password, 404 unknown phone, 429 blocked, block-after-5-fails works for unknown phones too.
+- Tests: `/app/backend/tests/test_public_order_auth.py` (7/7) + Playwright cases 1-10 all pass — iteration_5.json.
+
 ## Delivered v1.5 (2026-02-05) — 67/67 backend tests pass
 
 ### v1.5 highlights (print system rebuilt):

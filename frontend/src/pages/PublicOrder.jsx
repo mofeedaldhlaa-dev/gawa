@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { fmt, openWhatsApp } from "@/lib/utils";
-import { Wifi, CheckCircle, Copy, KeyRound, Phone, Ban } from "lucide-react";
+import { Wifi, CheckCircle, Copy, KeyRound, Phone, Ban, AlertCircle } from "lucide-react";
 
 const ADMIN_WHATSAPP = "784225716";
 
@@ -26,8 +26,12 @@ export default function PublicOrder() {
   const [showChangePwd, setShowChangePwd] = useState(false);
   const [blocked, setBlocked] = useState(false);
   const [selectedCat, setSelectedCat] = useState(null);
+  const [loginError, setLoginError] = useState("");
 
-  const login = async () => {
+  const login = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    setLoginError("");
+    if (!phone || !password) { setLoginError("أدخل رقم الهاتف وكلمة المرور"); return; }
     setLoading(true);
     try {
       const r = await api.post("/public/card-order/login", { phone, password });
@@ -35,9 +39,16 @@ export default function PublicOrder() {
       const cr = await api.get("/public/card-order/categories");
       setCats(cr.data);
       toast.success(`مرحباً ${r.data.name}`);
-    } catch (e) {
-      if (e.response?.status === 429) { setBlocked(true); toast.error(errText(e)); }
-      else toast.error(errText(e));
+    } catch (err) {
+      // NEVER navigate/redirect on failure. Show error inline in the same page.
+      const status = err.response?.status;
+      const msg = errText(err);
+      if (status === 429) { setBlocked(true); setLoginError(msg); }
+      else if (status === 401) { setLoginError("كلمة المرور غير صحيحة"); }
+      else if (status === 404) { setLoginError("رقم الهاتف أو كلمة المرور غير صحيحة"); }
+      else if (status === 403) { setLoginError(msg || "الحساب معطل"); }
+      else if (!err.response) { setLoginError("تعذر الاتصال بالخادم. تحقق من الإنترنت وحاول مجدداً."); }
+      else { setLoginError(msg || "حدث خطأ"); }
     }
     setLoading(false);
   };
@@ -88,16 +99,22 @@ export default function PublicOrder() {
         </div>
 
         {!customer && (
-          <div className="space-y-3">
-            <div><Label>رقم الهاتف</Label><Input value={phone} onChange={(e) => setPhone(e.target.value)} data-testid="po-phone"/></div>
-            <div><Label>كلمة المرور</Label><Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} data-testid="po-password"/></div>
-            <Button onClick={login} disabled={loading} className="w-full bg-[#221340]" data-testid="po-login">{loading?"جاري...":"دخول"}</Button>
+          <form onSubmit={login} className="space-y-3" data-testid="po-login-form" noValidate>
+            <div><Label>رقم الهاتف</Label><Input value={phone} onChange={(e) => { setPhone(e.target.value); setLoginError(""); }} data-testid="po-phone" autoComplete="tel" inputMode="tel"/></div>
+            <div><Label>كلمة المرور</Label><Input type="password" value={password} onChange={(e) => { setPassword(e.target.value); setLoginError(""); }} data-testid="po-password" autoComplete="current-password"/></div>
+            {loginError && (
+              <div className="flex items-start gap-2 rounded-md border border-red-300 bg-red-50 text-red-700 px-3 py-2 text-sm" data-testid="po-login-error" role="alert">
+                <AlertCircle size={16} className="mt-0.5 shrink-0"/>
+                <span>{loginError}</span>
+              </div>
+            )}
+            <Button type="submit" disabled={loading} className="w-full bg-[#221340]" data-testid="po-login">{loading?"جاري...":"دخول"}</Button>
             <div className="flex justify-between text-sm">
               <button type="button" onClick={() => setShowForgot(true)} className="text-[#452480] hover:underline" data-testid="po-forgot">نسيت كلمة المرور؟</button>
               <button type="button" onClick={() => setShowRegister(true)} className="text-[#452480] hover:underline" data-testid="po-register">إنشاء حساب</button>
             </div>
-            <div className="text-center text-xs text-slate-500 pt-2 border-t">لاتمتلك حساب .. <button onClick={() => setShowRegister(true)} className="text-[#D4AF37] font-bold hover:underline">إنشاء حساب</button></div>
-          </div>
+            <div className="text-center text-xs text-slate-500 pt-2 border-t">لاتمتلك حساب .. <button type="button" onClick={() => setShowRegister(true)} className="text-[#D4AF37] font-bold hover:underline">إنشاء حساب</button></div>
+          </form>
         )}
 
         {customer && !result && (
