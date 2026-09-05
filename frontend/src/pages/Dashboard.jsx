@@ -34,7 +34,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6" data-testid="dashboard">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-3">
         <Stat testid="stat-sales-today" label="مبيعات اليوم" value={fmt(d.sales_today)} tone="purple" />
         <Stat testid="stat-sales-month" label="مبيعات الشهر" value={fmt(d.sales_month)} tone="gold" />
         <Stat testid="stat-purchases" label="المشتريات" value={fmt(d.purchases_total)} tone="light" />
@@ -47,7 +47,7 @@ export default function Dashboard() {
 
       <div>
         <div className="text-sm font-bold text-[#221340] mb-3">اختصارات سريعة</div>
-        <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2 sm:gap-3">
           <Quick to="/sales/new" label="فاتورة مبيعات" icon={ShoppingCart} testid="quick-sale" />
           <Quick to="/purchases/new" label="فاتورة مشتريات" icon={Package} testid="quick-purchase" />
           <Quick to="/receipts" label="سند قبض/صرف" icon={Receipt} testid="quick-receipt" />
@@ -60,8 +60,8 @@ export default function Dashboard() {
       {d.chart?.length > 0 && (
         <Card className="p-4">
           <div className="text-sm font-bold text-[#221340] mb-3">المبيعات اليومية</div>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
+          <div className="h-64 min-w-0">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0}>
               <LineChart data={d.chart}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
                 <XAxis dataKey="date" tick={{ fontSize: 11 }} />
@@ -74,7 +74,7 @@ export default function Dashboard() {
         </Card>
       )}
 
-      <div className="grid md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">
         <Card className="p-4">
           <div className="text-sm font-bold text-[#221340] mb-3">آخر الفواتير</div>
           <div className="space-y-2">

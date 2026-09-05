@@ -165,27 +165,27 @@ function Shell({ children }) {
         </div>
       )}
 
-      <main className="flex-1 md:mr-64 flex flex-col min-h-screen">
+      <main className="flex-1 md:mr-64 flex flex-col min-h-screen min-w-0 w-full">
         <header className="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-slate-200">
-          <div className="flex items-center justify-between px-4 py-3">
-            <div className="flex items-center gap-3">
-              <button className="md:hidden p-2" onClick={() => setOpen(true)} data-testid="menu-btn"><Menu /></button>
-              <div className="hidden sm:block font-bold text-[#221340]">
+          <div className="flex items-center justify-between gap-2 px-3 sm:px-4 py-3">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              <button className="md:hidden p-2 -mr-2 shrink-0" onClick={() => setOpen(true)} data-testid="menu-btn" aria-label="menu"><Menu /></button>
+              <div className="font-bold text-[#221340] truncate text-sm sm:text-base">
                 {items.find((m) => location.pathname === m.path)?.label || "لوحة التحكم"}
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <button onClick={handleSync} data-testid="sync-btn" className={`flex items-center gap-1 text-xs px-3 py-1.5 rounded-full ${online ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+              <button onClick={handleSync} data-testid="sync-btn" aria-label={online?"متصل":"غير متصل"} className={`flex items-center gap-1 text-xs px-2 sm:px-3 py-1.5 rounded-full ${online ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
                 {online ? <Wifi size={14} /> : <WifiOff size={14} />}
-                {online ? "متصل" : "غير متصل"}
+                <span className="hidden sm:inline">{online ? "متصل" : "غير متصل"}</span>
                 {pending > 0 && <span className="mr-1 bg-amber-500 text-white rounded-full px-1.5">{pending}</span>}
               </button>
               <NotificationBell />
-              <div className="text-sm text-slate-600 hidden sm:block">{user?.name}</div>
+              <div className="text-sm text-slate-600 hidden md:block max-w-[140px] truncate">{user?.name}</div>
             </div>
           </div>
         </header>
-        <div className="flex-1 p-4 md:p-6 pb-24 md:pb-6">{children}</div>
+        <div className="flex-1 p-3 sm:p-4 md:p-6 pb-24 md:pb-6 min-w-0">{children}</div>
       </main>
     </div>
   );

@@ -106,9 +106,9 @@ export default function Cards() {
       <Card className="p-4">
         <div className="flex justify-between items-center mb-3 flex-wrap gap-2">
           <div className="font-bold text-[#221340]">قائمة الكروت المرقمة</div>
-          <div className="flex gap-2">
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
             <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v==="all"?"":v)}>
-              <SelectTrigger className="w-40"><SelectValue placeholder="كل الحالات"/></SelectTrigger>
+              <SelectTrigger className="w-full sm:w-40"><SelectValue placeholder="كل الحالات"/></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">كل الحالات</SelectItem>
                 <SelectItem value="available">متوفر</SelectItem>
@@ -117,11 +117,11 @@ export default function Cards() {
                 <SelectItem value="cancelled">ملغي</SelectItem>
               </SelectContent>
             </Select>
-            <Input placeholder="بحث برقم الكرت" value={search} onChange={(e) => setSearch(e.target.value)} className="max-w-xs" data-testid="cards-search" />
+            <Input placeholder="بحث برقم الكرت" value={search} onChange={(e) => setSearch(e.target.value)} className="w-full sm:max-w-xs" data-testid="cards-search" />
           </div>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm min-w-[560px]">
             <thead className="bg-slate-50"><tr className="text-right"><th className="p-2">الرقم</th><th className="p-2">الفئة</th><th className="p-2">الحالة</th><th className="p-2"></th></tr></thead>
             <tbody>
               {cardsList.slice(0, 300).map((c) => (

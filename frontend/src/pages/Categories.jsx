@@ -33,7 +33,7 @@ function CategoryForm({ initial, onSaved, onClose }) {
   return (
     <form onSubmit={submit} className="space-y-3">
       <div><Label>اسم الفئة</Label><Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required data-testid="cat-name" /></div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div><Label>قيمة الكرت</Label><Input type="number" value={f.value} onChange={(e) => setF({ ...f, value: e.target.value })} data-testid="cat-value" /></div>
         <div><Label>سعر الشراء</Label><Input type="number" value={f.purchase_price} onChange={(e) => setF({ ...f, purchase_price: e.target.value })} /></div>
         <div><Label>سعر العملاء</Label><Input type="number" value={f.sale_price_customer} onChange={(e) => setF({ ...f, sale_price_customer: e.target.value, sale_price: e.target.value })} data-testid="cat-sale-cust" /></div>

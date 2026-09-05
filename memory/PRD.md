@@ -5,6 +5,18 @@ Owner: mofeedaldhlaa@gmail.com • 784225716 • المخاء
 ## Stack
 FastAPI + MongoDB + React (RTL) + JWT + IndexedDB + wa.me
 
+## Delivered v1.7 (2026-02-05) — Full mobile-responsive overhaul
+- Global CSS (`index.css`): `html, body` locked at `max-width:100vw` with `overflow-x:hidden`; `main` gets `min-width:0` so wide tables scroll INSIDE their card container instead of pushing the page; inputs forced to `font-size:16px` on <640px to prevent iOS zoom; ≥44px touch targets on coarse pointers; sonner toaster capped inside viewport.
+- Viewport meta (`public/index.html`): removed `maximum-scale=1` (accessibility) and added `viewport-fit=cover`.
+- Shell (`App.js`): header now truncates title, hides labels on tiny screens, keeps `menu-btn / sync-btn / bell-btn / logout-btn` always accessible; main is `min-w-0 w-full`; content padding scales `p-3 sm:p-4 md:p-6`.
+- Mobile card views (in addition to hidden md-table) added to: Sales, Purchases, Receipts, Orders, Users, Suppliers, BlockedCustomers, CustomerStatement.
+- Forms converted to `grid-cols-1 sm:grid-cols-2` on: Customers, Users (+permissions), Suppliers, Categories.
+- Sale/Purchase item rows: category takes a full row on <sm, quantity/price/total/remove on the same row → readable on 320px.
+- Reports & Cards filter bars: `flex-col sm:flex-row` with `w-full sm:w-auto` inputs.
+- AuditLog & Cards tables use `min-w-[720px]` / `min-w-[560px]` to trigger internal horizontal scroll cleanly (user's Option 3).
+- Recharts `ResponsiveContainer` gets `minWidth={0}` to silence -1 width warnings on narrow viewports.
+- Tests: iteration_6.json — 17 pages @ 320/375/414/1920 all pass, zero page-level overflow, all mobile card views verified, desktop regression clean.
+
 ## Delivered v1.6 (2026-02-05) — Customer/Admin auth isolation
 - Root cause: `api.js` interceptor redirected ANY 401 to `/login`; the guard only excluded `/order-card` so `/order` was leaking failed customer logins to the admin login page.
 - Fix (frontend only, no backend change):

@@ -96,7 +96,7 @@ export default function SaleForm() {
   return (
     <div className="space-y-4 max-w-4xl" data-testid="sale-form">
       <Card className="p-4 md:p-6 space-y-4">
-        <div className="grid md:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
             <Label>العميل *</Label>
             <Select value={customerId} onValueChange={setCustomerId}>
@@ -121,15 +121,17 @@ export default function SaleForm() {
           <div className="flex justify-between items-center"><div className="font-bold">الأصناف</div><Button size="sm" onClick={addItem} data-testid="add-item"><Plus size={14}/> صنف</Button></div>
           {items.map((it, i) => (
             <Card key={i} className="p-3 bg-slate-50">
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-                <Select value={it.category_id} onValueChange={(v) => updateItem(i, "category_id", v)}>
-                  <SelectTrigger data-testid={`item-cat-${i}`}><SelectValue placeholder="الفئة" /></SelectTrigger>
-                  <SelectContent>{cats.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
-                </Select>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-2">
+                <div className="sm:col-span-2 md:col-span-1">
+                  <Select value={it.category_id} onValueChange={(v) => updateItem(i, "category_id", v)}>
+                    <SelectTrigger data-testid={`item-cat-${i}`}><SelectValue placeholder="الفئة" /></SelectTrigger>
+                    <SelectContent>{cats.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
                 <Input type="number" placeholder="الكمية" value={it.quantity} onChange={(e) => updateItem(i, "quantity", e.target.value)} data-testid={`item-qty-${i}`} />
                 <Input type="number" placeholder="السعر" value={it.price} onChange={(e) => updateItem(i, "price", e.target.value)} data-testid={`item-price-${i}`} />
-                <div className="text-sm num flex items-center px-2 bg-white rounded border">{fmt(it.quantity * it.price)}</div>
-                <Button variant="ghost" size="sm" onClick={() => removeItem(i)}><Trash2 size={16} className="text-red-500" /></Button>
+                <div className="text-sm num flex items-center px-2 bg-white rounded border h-10">{fmt(it.quantity * it.price)}</div>
+                <Button variant="ghost" size="sm" onClick={() => removeItem(i)} className="justify-self-start sm:justify-self-auto"><Trash2 size={16} className="text-red-500" /> <span className="sm:hidden mr-1">حذف</span></Button>
               </div>
               <div className="mt-2 text-xs">
                 <label className="flex items-center gap-2"><input type="checkbox" checked={it.use_numbered} onChange={(e) => updateItem(i, "use_numbered", e.target.checked)} /> استخدام كروت مرقمة (ألصق الأرقام)</label>
@@ -147,8 +149,8 @@ export default function SaleForm() {
         </div>
         <Textarea placeholder="ملاحظات" value={notes} onChange={(e) => setNotes(e.target.value)} />
         <div className="flex gap-2 flex-wrap">
-          <Button onClick={submit} disabled={loading} className="bg-[#221340]" data-testid="sale-save"><Save size={16} className="ml-1"/> {loading ? "جاري..." : "حفظ الفاتورة"}</Button>
-          {saved && <Button onClick={sendWhatsApp} variant="outline" className="border-green-600 text-green-700" data-testid="sale-wa"><MessageCircle size={16} className="ml-1"/> إرسال واتساب</Button>}
+          <Button onClick={submit} disabled={loading} className="bg-[#221340] w-full sm:w-auto" data-testid="sale-save"><Save size={16} className="ml-1"/> {loading ? "جاري..." : "حفظ الفاتورة"}</Button>
+          {saved && <Button onClick={sendWhatsApp} variant="outline" className="border-green-600 text-green-700 w-full sm:w-auto" data-testid="sale-wa"><MessageCircle size={16} className="ml-1"/> إرسال واتساب</Button>}
         </div>
         {saved && <div className="p-3 bg-green-50 border border-green-200 rounded" data-testid="sale-success">تم إنشاء الفاتورة <span className="font-mono font-bold">{saved.number}</span></div>}
       </Card>

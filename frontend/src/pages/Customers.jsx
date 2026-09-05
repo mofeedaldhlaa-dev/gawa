@@ -29,7 +29,7 @@ function CustomerForm({ initial, onSaved, onClose }) {
   };
   return (
     <form onSubmit={submit} className="space-y-3" data-testid="customer-form">
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div><Label>الاسم *</Label><Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required data-testid="cust-name" /></div>
         <div><Label>نوع الحساب</Label>
           <Select value={f.customer_type || "customer"} onValueChange={(v) => setF({ ...f, customer_type: v })}>
@@ -40,7 +40,7 @@ function CustomerForm({ initial, onSaved, onClose }) {
       </div>
       <div><Label>رقم الهاتف</Label><Input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} data-testid="cust-phone" /></div>
       {!initial?.id && <div><Label>كلمة المرور (اتركها فارغة للتوليد)</Label><Input value={f.password || ""} onChange={(e) => setF({ ...f, password: e.target.value })} placeholder="JWDXXXXX" data-testid="cust-password" /></div>}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div><Label>سقف الحساب</Label><Input type="number" value={f.credit_limit} onChange={(e) => setF({ ...f, credit_limit: e.target.value })} data-testid="cust-limit" /></div>
         <div><Label>الرصيد الافتتاحي</Label><Input type="number" value={f.opening_balance} onChange={(e) => setF({ ...f, opening_balance: e.target.value })} data-testid="cust-opening" /></div>
       </div>

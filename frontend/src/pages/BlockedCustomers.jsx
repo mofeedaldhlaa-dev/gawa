@@ -26,7 +26,7 @@ export default function BlockedCustomers() {
         <Ban className="text-red-500" size={20}/>
         <div className="text-lg font-bold text-[#221340]">العملاء المحظورون ({items.length})</div>
       </div>
-      <Card className="overflow-x-auto">
+      <Card className="overflow-x-auto hidden md:block">
         <table className="w-full text-sm">
           <thead className="bg-slate-50"><tr className="text-right"><th className="p-3">العميل</th><th className="p-3">الهاتف</th><th className="p-3">وقت الحظر</th><th className="p-3">ينتهي في</th><th className="p-3">السبب</th><th className="p-3"></th></tr></thead>
           <tbody>
@@ -44,6 +44,25 @@ export default function BlockedCustomers() {
           </tbody>
         </table>
       </Card>
+      <div className="md:hidden space-y-2">
+        {items.map((b) => (
+          <Card key={b.phone} className="p-3">
+            <div className="flex justify-between items-start gap-2">
+              <div className="min-w-0">
+                <div className="font-bold truncate">{b.customer_name || b.phone}</div>
+                <div className="text-xs font-mono text-slate-500 truncate">{b.phone}</div>
+              </div>
+              <Button size="sm" onClick={() => unblock(b.phone)} className="bg-green-600 hover:bg-green-700 shrink-0" data-testid={`unblock-${b.phone}`}><Unlock size={12} className="ml-1"/> رفع</Button>
+            </div>
+            <div className="text-xs text-slate-500 mt-2 space-y-1">
+              <div>وقت الحظر: {fmtDate(b.blocked_at)}</div>
+              <div>ينتهي: {fmtDate(b.blocked_until)}</div>
+              <div>{b.failed_before_block} محاولات فاشلة</div>
+            </div>
+          </Card>
+        ))}
+        {items.length === 0 && <div className="text-center text-slate-400 p-6">لا يوجد عملاء محظورون</div>}
+      </div>
     </div>
   );
 }

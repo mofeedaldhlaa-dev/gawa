@@ -67,15 +67,17 @@ export default function PurchaseForm() {
         <div className="flex justify-between"><div className="font-bold">الأصناف</div><Button size="sm" onClick={() => setItems([...items, { category_id: "", quantity: 1, price: 0, use_numbered: false, card_numbers_text: "" }])}><Plus size={14}/></Button></div>
         {items.map((it, i) => (
           <Card key={i} className="p-3 bg-slate-50">
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-2 items-center">
-              <Select value={it.category_id} onValueChange={(v) => update(i, "category_id", v)}>
-                <SelectTrigger data-testid={`purch-item-cat-${i}`}><SelectValue placeholder="الفئة"/></SelectTrigger>
-                <SelectContent>{cats.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
-              </Select>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-2 items-center">
+              <div className="sm:col-span-2 md:col-span-1">
+                <Select value={it.category_id} onValueChange={(v) => update(i, "category_id", v)}>
+                  <SelectTrigger data-testid={`purch-item-cat-${i}`}><SelectValue placeholder="الفئة"/></SelectTrigger>
+                  <SelectContent>{cats.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
               <Input type="number" placeholder="الكمية" value={it.use_numbered ? (it.card_numbers_text || "").split(/\r?\n/).filter((x) => x.trim()).length : it.quantity} onChange={(e) => update(i, "quantity", e.target.value)} disabled={it.use_numbered} data-testid={`purch-qty-${i}`}/>
               <Input type="number" placeholder="سعر الشراء" value={it.price} onChange={(e) => update(i, "price", e.target.value)}/>
-              <div className="num font-bold px-2">{fmt((it.use_numbered ? (it.card_numbers_text || "").split(/\r?\n/).filter((x) => x.trim()).length : it.quantity) * it.price)}</div>
-              <Button variant="ghost" onClick={() => setItems(items.filter((_, x) => x !== i))}><Trash2 size={14} className="text-red-500"/></Button>
+              <div className="num font-bold px-2 h-10 flex items-center bg-white rounded border">{fmt((it.use_numbered ? (it.card_numbers_text || "").split(/\r?\n/).filter((x) => x.trim()).length : it.quantity) * it.price)}</div>
+              <Button variant="ghost" onClick={() => setItems(items.filter((_, x) => x !== i))} className="justify-self-start sm:justify-self-auto"><Trash2 size={14} className="text-red-500"/> <span className="sm:hidden mr-1">حذف</span></Button>
             </div>
             <div className="mt-2 text-xs">
               <label className="flex items-center gap-2"><input type="checkbox" checked={it.use_numbered} onChange={(e) => update(i, "use_numbered", e.target.checked)} data-testid={`purch-numbered-${i}`}/> شراء كروت مرقمة (ألصق الأرقام)</label>

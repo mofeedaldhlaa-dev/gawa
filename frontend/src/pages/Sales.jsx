@@ -55,10 +55,10 @@ export default function Sales() {
   return (
     <div className="space-y-4" data-testid="sales-page">
       <div className="flex justify-between flex-wrap gap-2 no-print">
-        <div className="relative max-w-xs flex-1"><Search className="absolute right-3 top-2.5 text-slate-400" size={18}/><Input placeholder="بحث برقم GWD..." value={q} onChange={(e) => setQ(e.target.value)} className="pr-10" /></div>
-        <Link to="/sales/new"><Button className="bg-[#221340]" data-testid="new-sale-btn"><Plus size={16} className="ml-1"/> فاتورة جديدة</Button></Link>
+        <div className="relative w-full sm:max-w-xs flex-1"><Search className="absolute right-3 top-2.5 text-slate-400" size={18}/><Input placeholder="بحث برقم GWD..." value={q} onChange={(e) => setQ(e.target.value)} className="pr-10" /></div>
+        <Link to="/sales/new" className="w-full sm:w-auto"><Button className="bg-[#221340] w-full sm:w-auto" data-testid="new-sale-btn"><Plus size={16} className="ml-1"/> فاتورة جديدة</Button></Link>
       </div>
-      <Card className="overflow-x-auto">
+      <Card className="overflow-x-auto hidden md:block">
         <table className="w-full text-sm">
           <thead className="bg-slate-50"><tr className="text-right"><th className="p-3">الرقم</th><th className="p-3">التاريخ</th><th className="p-3">العميل</th><th className="p-3">الإجمالي</th><th className="p-3">المدفوع</th><th className="p-3">المتبقي</th><th className="p-3 no-print"></th></tr></thead>
           <tbody>
@@ -82,6 +82,29 @@ export default function Sales() {
           </tbody>
         </table>
       </Card>
+      <div className="md:hidden space-y-2 no-print">
+        {items.map((s) => (
+          <Card key={s.id} className="p-3">
+            <div className="flex justify-between items-start gap-2">
+              <div className="min-w-0">
+                <div className="font-mono font-bold text-[#452480] truncate">{s.number}</div>
+                <div className="text-xs text-slate-500 truncate">{s.customer_name || "نقدي"} • {fmtDate(s.created_at)}</div>
+              </div>
+              <div className="text-left text-xs shrink-0">
+                <div>الإجمالي: <span className="num font-bold">{fmt(s.total)}</span></div>
+                <div className="text-amber-700">المتبقي: <span className="num font-bold">{fmt(s.remaining)}</span></div>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-1 mt-2">
+              <Button size="sm" variant="outline" onClick={() => setViewing(s)}><Eye size={12} className="ml-1"/> عرض</Button>
+              <Button size="sm" variant="outline" onClick={() => setEditing({ id: s.id, discount: s.discount, paid: s.paid, notes: s.notes || "" })}>تعديل</Button>
+              <Button size="sm" variant="outline" onClick={() => doPrint(s)}><Printer size={12} className="ml-1"/> طباعة</Button>
+              <Button size="sm" variant="outline" onClick={() => sendWA(s)}><MessageCircle size={12} className="ml-1 text-green-600"/> واتساب</Button>
+            </div>
+          </Card>
+        ))}
+        {items.length === 0 && <div className="text-center text-slate-400 p-6">لا توجد فواتير</div>}
+      </div>
 
       <Dialog open={!!viewing} onOpenChange={(o) => !o && setViewing(null)}>
         <DialogContent>

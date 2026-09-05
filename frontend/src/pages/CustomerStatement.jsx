@@ -33,7 +33,7 @@ export default function CustomerStatement() {
           <div className="bg-slate-50 p-3 rounded-lg"><div className="text-xs text-slate-500">الرصيد الافتتاحي</div><div className="num font-bold">{fmt(c.opening_balance)}</div></div>
         </div>
       </Card>
-      <Card className="overflow-x-auto">
+      <Card className="overflow-x-auto hidden md:block">
         <table className="w-full text-sm">
           <thead className="bg-slate-50">
             <tr className="text-right">
@@ -56,6 +56,28 @@ export default function CustomerStatement() {
           </tbody>
         </table>
       </Card>
+      <div className="md:hidden space-y-2">
+        {data.entries.map((e) => (
+          <Card key={e.id} className="p-3 text-sm">
+            <div className="flex justify-between items-start gap-2">
+              <div className="min-w-0">
+                <div className="text-xs text-slate-500">{fmtDate(e.created_at)}</div>
+                <div className="font-mono text-[#452480] text-xs">{e.op_number || "-"}</div>
+                <div className="mt-1 break-words">{e.description}</div>
+              </div>
+              <div className="text-left shrink-0">
+                <div className="text-xs">الرصيد</div>
+                <div className="num font-bold">{fmt(e.balance)}</div>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2 mt-2 text-xs">
+              <div><div className="text-slate-500">مدين</div><div className="num font-bold">{fmt(e.debit)}</div></div>
+              <div><div className="text-slate-500">دائن</div><div className="num font-bold">{fmt(e.credit)}</div></div>
+            </div>
+          </Card>
+        ))}
+        {data.entries.length === 0 && <div className="text-center text-slate-400 p-6">لا توجد بيانات لعرضها</div>}
+      </div>
     </div>
   );
 }

@@ -140,7 +140,7 @@ export default function Receipts() {
         </DialogContent>
       </Dialog>
 
-      <Card className="overflow-x-auto">
+      <Card className="overflow-x-auto hidden md:block">
         <table className="w-full text-sm">
           <thead className="bg-slate-50"><tr className="text-right"><th className="p-3">الرقم</th><th className="p-3">التاريخ</th><th className="p-3">النوع</th><th className="p-3">الطرف</th><th className="p-3">المبلغ</th><th className="p-3">الرصيد بعد</th><th></th></tr></thead>
           <tbody>
@@ -166,6 +166,34 @@ export default function Receipts() {
           </tbody>
         </table>
       </Card>
+      <div className="md:hidden space-y-2 no-print">
+        {items.map((r) => {
+          const p = (r.party_type === "customer" ? customers : suppliers).find((x) => x.id === r.party_id);
+          return (
+            <Card key={r.id} className="p-3">
+              <div className="flex justify-between items-start gap-2">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono font-bold text-[#452480] truncate">{r.number}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${r.kind==='receipt'?'bg-green-100 text-green-700':'bg-blue-100 text-blue-700'}`}>{r.kind==='receipt'?'قبض':'صرف'}</span>
+                  </div>
+                  <div className="text-xs text-slate-500 truncate">{r.party_name} • {fmtDate(r.created_at)}</div>
+                </div>
+                <div className="text-left text-xs shrink-0">
+                  <div>المبلغ: <span className="num font-bold">{fmt(r.amount)}</span></div>
+                  <div className="text-slate-500">بعد: <span className="num">{fmt(r.balance_after)}</span></div>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-1 mt-2">
+                <Button size="sm" variant="outline" onClick={() => setSaved({ ...r, party_phone: p?.phone })}><MessageCircle size={12} className="ml-1"/> واتساب</Button>
+                <Button size="sm" variant="outline" onClick={() => printReceipt({ receipt: r, party: p, username: user?.name || user?.username })}><Printer size={12} className="ml-1"/> طباعة</Button>
+                <Button size="sm" variant="outline" onClick={() => setEditing({ id: r.id, amount: r.amount, description: r.description || "" })}>تعديل</Button>
+              </div>
+            </Card>
+          );
+        })}
+        {items.length === 0 && <div className="text-center text-slate-400 p-6">لا توجد سندات</div>}
+      </div>
     </div>
   );
 }

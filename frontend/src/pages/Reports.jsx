@@ -95,16 +95,16 @@ export default function Reports() {
           <TabsTrigger value="stock" data-testid="rep-stock">المخزون</TabsTrigger>
         </TabsList>
 
-        <Card className="p-3 flex gap-2 items-end flex-wrap mt-3 no-print">
+        <Card className="p-3 flex flex-col sm:flex-row gap-2 sm:items-end flex-wrap mt-3 no-print">
           {["sales", "purchases"].includes(tab) && (
             <>
-              <div><label className="text-xs">من</label><Input type="date" value={start} onChange={(e) => setStart(e.target.value)}/></div>
-              <div><label className="text-xs">إلى</label><Input type="date" value={end} onChange={(e) => setEnd(e.target.value)}/></div>
-              <Button onClick={load} className="bg-[#221340]">تصفية</Button>
+              <div className="w-full sm:w-auto"><label className="text-xs">من</label><Input type="date" value={start} onChange={(e) => setStart(e.target.value)}/></div>
+              <div className="w-full sm:w-auto"><label className="text-xs">إلى</label><Input type="date" value={end} onChange={(e) => setEnd(e.target.value)}/></div>
+              <Button onClick={load} className="bg-[#221340] w-full sm:w-auto">تصفية</Button>
             </>
           )}
-          <Input placeholder="بحث..." value={q} onChange={(e) => setQ(e.target.value)} className="max-w-xs"/>
-          <Button onClick={printCurrent} variant="outline" data-testid="print-report"><Printer size={14} className="ml-1"/> طباعة / PDF</Button>
+          <Input placeholder="بحث..." value={q} onChange={(e) => setQ(e.target.value)} className="w-full sm:max-w-xs"/>
+          <Button onClick={printCurrent} variant="outline" data-testid="print-report" className="w-full sm:w-auto"><Printer size={14} className="ml-1"/> طباعة / PDF</Button>
         </Card>
 
         <TabsContent value="sales"><ReportTable data={filtered} kind="sales"/></TabsContent>

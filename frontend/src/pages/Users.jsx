@@ -36,14 +36,14 @@ function UserForm({ initial, allPerms, onSaved, onClose }) {
   };
   return (
     <form onSubmit={submit} className="space-y-3">
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div><Label>الاسم</Label><Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required data-testid="usr-name"/></div>
         <div><Label>اسم المستخدم</Label><Input value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} required data-testid="usr-username"/></div>
       </div>
       <div><Label>كلمة المرور {initial?.id && "(اتركها فارغة لعدم التغيير)"}</Label><Input type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} required={!initial?.id} data-testid="usr-password"/></div>
       <div>
         <Label>الصلاحيات</Label>
-        <div className="grid grid-cols-2 gap-2 mt-2 max-h-52 overflow-y-auto p-2 bg-slate-50 rounded">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2 max-h-52 overflow-y-auto p-2 bg-slate-50 rounded">
           {allPerms.map((p) => (
             <label key={p} className="flex items-center gap-2 text-sm">
               <Checkbox checked={f.permissions.includes(p)} onCheckedChange={() => toggle(p)} data-testid={`perm-${p}`}/>
@@ -74,7 +74,7 @@ export default function UsersPage() {
           </DialogContent>
         </Dialog>
       </div>
-      <Card className="overflow-x-auto">
+      <Card className="overflow-x-auto hidden md:block">
         <table className="w-full text-sm">
           <thead className="bg-slate-50"><tr className="text-right"><th className="p-3">الاسم</th><th className="p-3">المستخدم</th><th className="p-3">الدور</th><th className="p-3">الحالة</th><th className="p-3">آخر دخول</th><th></th></tr></thead>
           <tbody>
@@ -84,6 +84,24 @@ export default function UsersPage() {
           </tbody>
         </table>
       </Card>
+      <div className="md:hidden space-y-2">
+        {items.map((u) => (
+          <Card key={u.id} className="p-3">
+            <div className="flex justify-between items-start gap-2">
+              <div className="min-w-0">
+                <div className="font-bold truncate">{u.name}</div>
+                <div className="text-xs text-slate-500 font-mono truncate">{u.username} • {u.role==='admin'?'مدير':'مستخدم'}</div>
+                <div className="text-xs text-slate-400 mt-1">آخر دخول: {fmtDate(u.last_login)}</div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className={`text-xs px-2 py-0.5 rounded-full ${u.status==='active'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}`}>{u.status==='active'?'نشط':'معطل'}</span>
+                <Button size="sm" variant="outline" onClick={() => { setEdit(u); setOpen(true); }}><Edit size={14}/></Button>
+              </div>
+            </div>
+          </Card>
+        ))}
+        {items.length === 0 && <div className="text-center text-slate-400 p-6">لا يوجد مستخدمون</div>}
+      </div>
     </div>
   );
 }

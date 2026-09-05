@@ -29,7 +29,7 @@ function SupplierForm({ initial, onSaved, onClose }) {
     <form onSubmit={submit} className="space-y-3">
       <div><Label>اسم المورد *</Label><Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required data-testid="sup-name" /></div>
       <div><Label>الهاتف</Label><Input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} data-testid="sup-phone" /></div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div><Label>سقف الحساب</Label><Input type="number" value={f.credit_limit} onChange={(e) => setF({ ...f, credit_limit: e.target.value })} /></div>
         <div><Label>الرصيد الافتتاحي</Label><Input type="number" value={f.opening_balance} onChange={(e) => setF({ ...f, opening_balance: e.target.value })} /></div>
       </div>
@@ -56,7 +56,7 @@ export default function Suppliers() {
           </DialogContent>
         </Dialog>
       </div>
-      <Card className="overflow-x-auto">
+      <Card className="overflow-x-auto hidden md:block">
         <table className="w-full text-sm">
           <thead className="bg-slate-50"><tr className="text-right"><th className="p-3">الاسم</th><th className="p-3">الهاتف</th><th className="p-3">السقف</th><th className="p-3">الرصيد</th><th></th></tr></thead>
           <tbody>
@@ -71,6 +71,24 @@ export default function Suppliers() {
           </tbody>
         </table>
       </Card>
+      <div className="md:hidden space-y-2">
+        {items.map((s) => (
+          <Card key={s.id} className="p-3">
+            <div className="flex justify-between items-start gap-2">
+              <div className="min-w-0">
+                <div className="font-bold truncate">{s.name}</div>
+                <div className="text-xs text-slate-500 truncate">{s.phone}</div>
+              </div>
+              <Button size="sm" variant="outline" onClick={() => { setEdit(s); setOpen(true); }} className="shrink-0"><Edit size={14}/></Button>
+            </div>
+            <div className="grid grid-cols-2 gap-2 mt-2 text-xs">
+              <div><div className="text-slate-500">السقف</div><div className="num font-bold">{fmt(s.credit_limit)}</div></div>
+              <div><div className="text-slate-500">الرصيد</div><div className="num font-bold">{fmt(s.balance)}</div></div>
+            </div>
+          </Card>
+        ))}
+        {items.length === 0 && <div className="text-center text-slate-400 p-6">لا يوجد موردين</div>}
+      </div>
     </div>
   );
 }
