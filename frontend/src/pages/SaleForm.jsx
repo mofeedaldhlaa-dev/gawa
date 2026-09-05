@@ -18,7 +18,7 @@ export default function SaleForm() {
   const [cats, setCats] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [customerId, setCustomerId] = useState("");
-  const [saleType, setSaleType] = useState("cash");
+  const [saleType, setSaleType] = useState("");
   const [items, setItems] = useState([{ category_id: "", quantity: 1, price: 0, use_numbered: false, card_numbers: [] }]);
   const [discount, setDiscount] = useState(0);
   const [paid, setPaid] = useState(0);
@@ -51,6 +51,8 @@ export default function SaleForm() {
   const customer = customers.find((c) => c.id === customerId);
 
   const submit = async () => {
+    if (!customerId) { toast.error("يرجى اختيار العميل قبل حفظ الفاتورة."); return; }
+    if (!saleType) { toast.error("يرجى اختيار نوع الفاتورة: نقد أو آجل."); return; }
     if (items.some((i) => !i.category_id || !i.quantity)) { toast.error("أكمل بيانات الأصناف"); return; }
     setLoading(true);
     try {
@@ -96,19 +98,22 @@ export default function SaleForm() {
       <Card className="p-4 md:p-6 space-y-4">
         <div className="grid md:grid-cols-2 gap-3">
           <div>
-            <Label>العميل</Label>
+            <Label>العميل *</Label>
             <Select value={customerId} onValueChange={setCustomerId}>
-              <SelectTrigger data-testid="sale-customer"><SelectValue placeholder="نقدي (بدون عميل)" /></SelectTrigger>
+              <SelectTrigger data-testid="sale-customer"><SelectValue placeholder="اختر العميل" /></SelectTrigger>
               <SelectContent>{customers.map((c) => <SelectItem key={c.id} value={c.id}>{c.name} - {c.phone}</SelectItem>)}</SelectContent>
             </Select>
-            {customer && <div className="text-xs text-slate-500 mt-1">الرصيد: <span className="num">{fmt(customer.balance)}</span> | المتاح: <span className="num">{fmt(Math.max(0, (customer.credit_limit || 0) - (customer.balance || 0)))}</span></div>}
+            {customer && <div className="text-xs text-slate-500 mt-1">المديونية: <span className="num">{fmt(customer.balance)}</span> | المتاح: <span className="num">{fmt(Math.max(0, (customer.credit_limit || 0) - (customer.balance || 0)))}</span></div>}
           </div>
           <div>
-            <Label>نوع البيع</Label>
-            <RadioGroup value={saleType} onValueChange={setSaleType} className="flex gap-4 mt-2">
-              <label className="flex items-center gap-2"><RadioGroupItem value="cash" data-testid="sale-cash" /> نقدي</label>
-              <label className="flex items-center gap-2"><RadioGroupItem value="credit" data-testid="sale-credit" /> آجل</label>
-            </RadioGroup>
+            <Label>نوع الفاتورة *</Label>
+            <Select value={saleType} onValueChange={setSaleType}>
+              <SelectTrigger data-testid="sale-type"><SelectValue placeholder="اختر النوع" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="cash">نقد</SelectItem>
+                <SelectItem value="credit">آجل</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
 

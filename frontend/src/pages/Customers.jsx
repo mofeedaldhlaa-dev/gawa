@@ -39,7 +39,7 @@ function CustomerForm({ initial, onSaved, onClose }) {
         </div>
       </div>
       <div><Label>رقم الهاتف</Label><Input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} data-testid="cust-phone" /></div>
-      {!initial?.id && <div><Label>كلمة السر (اتركها فارغة للتوليد)</Label><Input value={f.password || ""} onChange={(e) => setF({ ...f, password: e.target.value })} placeholder="JWDXXXXX" data-testid="cust-password" /></div>}
+      {!initial?.id && <div><Label>كلمة المرور (اتركها فارغة للتوليد)</Label><Input value={f.password || ""} onChange={(e) => setF({ ...f, password: e.target.value })} placeholder="JWDXXXXX" data-testid="cust-password" /></div>}
       <div className="grid grid-cols-2 gap-3">
         <div><Label>سقف الحساب</Label><Input type="number" value={f.credit_limit} onChange={(e) => setF({ ...f, credit_limit: e.target.value })} data-testid="cust-limit" /></div>
         <div><Label>الرصيد الافتتاحي</Label><Input type="number" value={f.opening_balance} onChange={(e) => setF({ ...f, opening_balance: e.target.value })} data-testid="cust-opening" /></div>
@@ -134,7 +134,7 @@ export default function Customers() {
             <thead className="bg-slate-50 text-slate-600">
               <tr className="text-right">
                 <th className="p-3">الاسم</th><th className="p-3">النوع</th><th className="p-3">الهاتف</th><th className="p-3">السقف</th>
-                <th className="p-3">المديونية</th><th className="p-3">المتاح</th><th className="p-3">كلمة السر</th><th className="p-3"></th>
+                <th className="p-3">المديونية</th><th className="p-3">المتاح</th><th className="p-3">كلمة المرور</th><th className="p-3"></th>
               </tr>
             </thead>
             <tbody>

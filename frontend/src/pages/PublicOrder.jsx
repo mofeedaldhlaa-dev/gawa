@@ -90,7 +90,7 @@ export default function PublicOrder() {
         {!customer && (
           <div className="space-y-3">
             <div><Label>رقم الهاتف</Label><Input value={phone} onChange={(e) => setPhone(e.target.value)} data-testid="po-phone"/></div>
-            <div><Label>كلمة السر</Label><Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} data-testid="po-password"/></div>
+            <div><Label>كلمة المرور</Label><Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} data-testid="po-password"/></div>
             <Button onClick={login} disabled={loading} className="w-full bg-[#221340]" data-testid="po-login">{loading?"جاري...":"دخول"}</Button>
             <div className="flex justify-between text-sm">
               <button type="button" onClick={() => setShowForgot(true)} className="text-[#452480] hover:underline" data-testid="po-forgot">نسيت كلمة المرور؟</button>

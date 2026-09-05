@@ -59,6 +59,7 @@ export default function Receipts() {
     const msg = buildReceiptMessage({
       company: settings.company_name, kind: saved.kind, number: saved.number,
       amount: saved.amount, description: saved.description,
+      balance_after: saved.balance_after,
     });
     openWhatsApp(saved.party_phone, msg);
   };

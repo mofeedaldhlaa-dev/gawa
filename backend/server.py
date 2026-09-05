@@ -226,7 +226,7 @@ class PurchaseItemIn(BaseModel):
 class SaleIn(BaseModel):
     customer_id: Optional[str] = None
     customer_name: Optional[str] = ""
-    sale_type: str = "cash"  # cash / credit
+    sale_type: str = ""  # cash / credit - required
     items: List[SaleItemIn]
     discount: float = 0
     paid: float = 0
@@ -748,6 +748,11 @@ async def create_sale(data: SaleIn, user=Depends(require_perm("sales"))):
         existing = await db.sales.find_one({"idempotency_key": data.idempotency_key})
         if existing:
             return clean_doc(existing)
+    # Mandatory validations
+    if not data.customer_id:
+        raise HTTPException(status_code=400, detail="يرجى اختيار العميل قبل حفظ الفاتورة.")
+    if data.sale_type not in ("cash", "credit"):
+        raise HTTPException(status_code=400, detail="يرجى اختيار نوع الفاتورة: نقد أو آجل.")
 
     # Compute totals & validate stock
     subtotal = 0.0
@@ -1017,6 +1022,34 @@ async def create_purchase(data: PurchaseIn, user=Depends(require_perm("purchases
     await notify(f"مشتريات {number}", f"تم تسجيل فاتورة مشتريات بإجمالي {total}", "info")
     return clean_doc({**doc, "balance_after": balance_after})
 
+class PurchaseEditIn(BaseModel):
+    discount: Optional[float] = None
+    paid: Optional[float] = None
+    notes: Optional[str] = None
+
+@api.put("/purchases/{pid}")
+async def edit_purchase(pid: str, data: PurchaseEditIn, user=Depends(require_perm("edit_ops"))):
+    doc = await db.purchases.find_one({"id": pid})
+    if not doc: raise HTTPException(status_code=404, detail="غير موجود")
+    if doc.get("status") != "active":
+        raise HTTPException(status_code=400, detail="لا يمكن تعديل فاتورة ملغاة")
+    subtotal = doc.get("subtotal", 0)
+    new_discount = data.discount if data.discount is not None else doc.get("discount", 0)
+    new_paid = data.paid if data.paid is not None else doc.get("paid", 0)
+    new_total = subtotal - new_discount
+    new_remaining = new_total - new_paid
+    old_remaining = doc.get("remaining", 0)
+    diff = new_remaining - old_remaining
+    if doc.get("supplier_id") and diff != 0:
+        await _adjust_party_balance("supplier", doc["supplier_id"], diff, doc["number"], f"تعديل فاتورة مشتريات {doc['number']}")
+    update = {"discount": new_discount, "paid": new_paid, "total": new_total, "remaining": new_remaining,
+              "notes": data.notes if data.notes is not None else doc.get("notes"),
+              "edited_at": now_iso(), "edited_by": user.get("username")}
+    await db.purchases.update_one({"id": pid}, {"$set": update})
+    await audit_log(user, "edit", "purchase", pid, {"old_total": doc.get("total")}, {"new_total": new_total})
+    return {"ok": True}
+
+
 @api.get("/purchases")
 async def list_purchases(user=Depends(require_perm("purchases"))):
     items = await db.purchases.find().sort("created_at", -1).limit(1000).to_list(1000)
@@ -1077,6 +1110,21 @@ async def public_login(data: CardOrderPublicLogin):
             "id": str(uuid.uuid4()), "phone": data.phone, "status": "rejected_not_found",
             "reason": "العميل غير موجود", "created_at": now_iso(),
         })
+        # Count non-existent-phone attempts toward the same rate limit
+        cur = await db.public_blocks.find_one({"phone": data.phone}) or {}
+        failed = cur.get("failed", 0) + 1
+        update = {"phone": data.phone, "failed": failed, "last_failed_at": now_iso()}
+        if failed >= 5:
+            block_until = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+            update["blocked_until"] = block_until
+            update["blocked_at"] = now_iso()
+            update["failed"] = 0
+            await db.notifications.insert_one({
+                "id": str(uuid.uuid4()), "title": "تم حظر رقم غير مسجل",
+                "message": f"تم حظر الرقم {data.phone} بسبب تجاوز عدد المحاولات الفاشلة (رقم غير مسجل). مدة الحظر: 24 ساعة.",
+                "type": "warning", "read": False, "created_at": now_iso(),
+            })
+        await db.public_blocks.update_one({"phone": data.phone}, {"$set": update}, upsert=True)
         raise HTTPException(status_code=404, detail="لاتمتلك حساب بهذا الرقم، عليك بانشاء حساب أولاً")
     if customer.get("password") != data.password:
         # increment failed counter

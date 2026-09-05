@@ -74,10 +74,9 @@ export const buildInvoiceMessage = ({ company, number, kind, details, amount, di
   return parts.join("\n");
 };
 
-export const buildReceiptMessage = ({ company, kind, number, amount, description }) => {
-  // kind: "receipt" (قبض من العميل → لكم) OR "payment" (صرف للمورد → عليكم)
+export const buildReceiptMessage = ({ company, kind, number, amount, description, balance_after }) => {
   const dir = kind === "receipt" ? "لكم" : "عليكم";
-  return [
+  const parts = [
     `من ${company}`,
     `المخاء`,
     `784225716`,
@@ -86,5 +85,9 @@ export const buildReceiptMessage = ({ company, kind, number, amount, description
     `مبلغ السند: ${fmt(amount)}`,
     `تفاصيل السند:`,
     description || "-",
-  ].join("\n");
+  ];
+  if (balance_after !== null && balance_after !== undefined) {
+    parts.push(``, `إجمالي الرصيد عليكم: ${fmt(balance_after)}`);
+  }
+  return parts.join("\n");
 };
