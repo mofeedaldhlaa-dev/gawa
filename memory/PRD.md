@@ -5,6 +5,11 @@ Owner: mofeedaldhlaa@gmail.com • 784225716 • المخاء
 ## Stack
 FastAPI + MongoDB + React (RTL) + JWT + IndexedDB + wa.me
 
+## Delivered v2.4 (2026-02-06) — Split low-stock alerts (numbered vs quantity)
+- **Backend** (`/api/reports/dashboard`): each alert now carries a `type: 'numbered' | 'quantity'`. Per-category thresholds come from `low_stock_numbered` and `low_stock_quantity` (already editable in `/categories`) with fallback to `low_stock_threshold`. Numbered stock is compared to numbered threshold, quantity stock to quantity threshold — never mixed. Same single loop, still 0 extra queries.
+- **Dashboard.jsx**: alerts render in TWO independent blocks stacked vertically — «🔴 كروت مرقمة – مخزون منخفض» and «🔴 كروت كمية – مخزون منخفض» — each with its own count badge. A block hides itself when its list is empty. Each card links to `/stock?category=<id>&type=<numbered|quantity>` so the target page can pre-filter. Data-testids: `low-stock-alerts` (wrapper), `low-stock-numbered`, `low-stock-quantity`, `low-stock-<type>-<id>`.
+- Verified via API: response returns typed alerts (e.g., 6 numbered / 0 quantity for current DB). Dashboard on 375px shows the split blocks with the red circle badges, no page overflow.
+
 ## Delivered v2.3 (2026-02-06) — Low-stock alerts on dashboard
 - **`GET /api/reports/dashboard`** now includes a `low_stock_alerts` array computed **inside the existing inventory-value loop** (zero extra DB queries). Each entry: `category_id`, `category_name`, `available_total`, `numbered_available`, `quantity_available`, `threshold`. Only categories where `available_total <= threshold` are returned (threshold=0 disables the alert).
 - **`Dashboard.jsx`** shows a bold amber "تنبيهات المخزون" card at the top with a badge count. Each alert is a `<Link>` to `/stock?category=<id>`. Available count is red when 0, amber otherwise. Card is hidden entirely when the list is empty. Data-testids: `low-stock-alerts`, `low-stock-<id>`.

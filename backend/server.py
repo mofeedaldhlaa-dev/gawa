@@ -1588,7 +1588,10 @@ async def dashboard_stats(user=Depends(get_current_user)):
     cards_sold = await db.cards.count_documents({"status": "sold"})
     cards_used = await db.cards.count_documents({"status": "used"})
     users_count = await db.users.count_documents({})
-    # inventory value + low-stock alerts (reuse same loop, zero extra queries)
+    # inventory value + low-stock alerts (reuse same loop, zero extra queries).
+    # Numbered vs quantity are tracked INDEPENDENTLY using per-category thresholds
+    # `low_stock_numbered` and `low_stock_quantity`. Falls back to
+    # `low_stock_threshold` when either specific threshold is unset.
     cats = await db.card_categories.find().to_list(500)
     inventory_value = 0
     low_stock_alerts = []
@@ -1596,19 +1599,25 @@ async def dashboard_stats(user=Depends(get_current_user)):
         avail = await db.cards.count_documents({"category_id": c["id"], "status": "available"})
         stock = await db.stock.find_one({"category_id": c["id"]})
         qty_avail = (stock or {}).get("total", 0) - (stock or {}).get("sold", 0) if stock else 0
-        available_total = avail + max(0, qty_avail)
-        inventory_value += available_total * c.get("purchase_price", 0)
-        threshold = c.get("low_stock_threshold", 20) or 0
-        if threshold > 0 and available_total <= threshold:
+        inventory_value += (avail + max(0, qty_avail)) * c.get("purchase_price", 0)
+        combined = c.get("low_stock_threshold", 20) or 0
+        thr_num = c.get("low_stock_numbered")
+        thr_qty = c.get("low_stock_quantity")
+        if thr_num is None: thr_num = combined
+        if thr_qty is None: thr_qty = combined
+        if thr_num and thr_num > 0 and avail <= thr_num:
             low_stock_alerts.append({
-                "category_id": c["id"],
-                "category_name": c.get("name", ""),
-                "available_total": available_total,
-                "numbered_available": avail,
-                "quantity_available": max(0, qty_avail),
-                "threshold": threshold,
+                "type": "numbered",
+                "category_id": c["id"], "category_name": c.get("name", ""),
+                "available": avail, "threshold": thr_num,
             })
-    low_stock_alerts.sort(key=lambda x: x["available_total"])
+        if thr_qty and thr_qty > 0 and max(0, qty_avail) <= thr_qty:
+            low_stock_alerts.append({
+                "type": "quantity",
+                "category_id": c["id"], "category_name": c.get("name", ""),
+                "available": max(0, qty_avail), "threshold": thr_qty,
+            })
+    low_stock_alerts.sort(key=lambda x: (x["available"], x["type"]))
     # recent
     recent_sales = await db.sales.find().sort("created_at", -1).limit(5).to_list(5)
     recent_receipts = await db.receipts.find().sort("created_at", -1).limit(5).to_list(5)
