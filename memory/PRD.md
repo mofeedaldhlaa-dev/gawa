@@ -5,6 +5,17 @@ Owner: mofeedaldhlaa@gmail.com • 784225716 • المخاء
 ## Stack
 FastAPI + MongoDB + React (RTL) + JWT + IndexedDB + wa.me
 
+## Delivered v2.7 (2026-02-06) — File & media storage integration
+- **Backend integration**: Emergent object storage wired via `INTEGRATION_PROXY_URL` + `EMERGENT_LLM_KEY`. Added `init_storage`, `_put_object`, `_get_object` helpers with 404 auto re-init for stale keys. Prefix `jawad-net/uploads/<user_id>/<uuid>.<ext>`. Startup logs "Storage initialized".
+- **New API**:
+  - `POST /api/files/upload` — multipart, max 25 MB, optional `entity_type`/`entity_id` query params, DB row inserted into `db.files` with `is_deleted: false`.
+  - `GET /api/files?entity_type=&entity_id=` — lists non-deleted files newest first.
+  - `GET /api/files/{id}/download` — dual auth: `Authorization: Bearer` header OR `?auth=<jwt>` query so `<img src>` / `<a href>` work without JS wrappers. Returns content with correct MIME + `Content-Disposition: inline`.
+  - `DELETE /api/files/{id}` — soft delete (storage API has no delete).
+- **Frontend `/files` page**: drag-free file picker (image, PDF, csv, txt, xlsx, docx), upload progress %, gallery grid with image thumbnails, filename search, download-in-new-tab link, delete button. Registered in sidebar under «الملفات» with FolderOpen icon; route guarded by `dashboard` perm.
+- **Tested (curl)**: 7/7 — upload 200 (returns storage_path/size), list 1 file, download via header + query param both return exact content, soft-delete 200, deleted file 404, no-auth 401.
+- **Env**: `EMERGENT_LLM_KEY` added to `backend/.env`. `requests` (already in requirements) used for storage calls.
+
 ## Delivered v2.6 (2026-02-06) — Auto-backup save button
 - **Backend**: `SettingsIn` gains `backup_time: Optional[str]` and `backup_auto: Optional[bool]`. `GET /api/settings` echoes both (defaults `"02:00"` / `false`). Same single-write POST path — no new endpoints.
 - **Settings.jsx**: dedicated **«حفظ إعدادات النسخ التلقائي»** button (`data-testid=backup-auto-save`) below the time input and auto toggle. Sends only `{backup_time, backup_auto}`. Client-side validation: time must match `HH:MM`; enabling auto requires a saved `backup_email` first (friendly toast otherwise). Success toast switches between «تم تفعيل النسخ الاحتياطي التلقائي.» when auto=true and «تم حفظ إعدادات النسخ التلقائي.» when auto=false. Values load once on page mount.

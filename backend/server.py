@@ -10,9 +10,11 @@ import jwt
 import secrets
 import string
 import logging
+import requests
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Any, Dict, Literal
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, status
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, status, UploadFile, File, Query, Header
+from fastapi.responses import Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -28,6 +30,57 @@ ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'admin')
 ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'admin123')
 COMPANY_NAME = os.environ.get('COMPANY_NAME', 'شبكة جواد نت اللاسلكية')
 COMPANY_PHONE = os.environ.get('COMPANY_PHONE', '784225716')
+
+# ============ Object storage (Emergent integration) ============
+STORAGE_BASE = (os.environ.get("INTEGRATION_PROXY_URL") or "").strip() or "https://integrations.emergentagent.com"
+STORAGE_URL = STORAGE_BASE.rstrip("/") + "/objstore/api/v1/storage"
+EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
+APP_NAME = "jawad-net"
+_storage_key: Optional[str] = None
+
+def init_storage(force: bool = False) -> Optional[str]:
+    """Called once at startup and lazily on cache miss. Returns storage_key or None on failure."""
+    global _storage_key
+    if _storage_key and not force:
+        return _storage_key
+    if not EMERGENT_KEY:
+        return None
+    try:
+        resp = requests.post(f"{STORAGE_URL}/init", json={"emergent_key": EMERGENT_KEY}, timeout=30)
+        resp.raise_for_status()
+        _storage_key = resp.json().get("storage_key")
+        return _storage_key
+    except Exception as e:
+        logging.getLogger("jawad").error(f"Storage init failed: {e}")
+        return None
+
+def _put_object(path: str, data: bytes, content_type: str) -> dict:
+    key = init_storage()
+    if not key: raise HTTPException(status_code=503, detail="خدمة التخزين غير متوفرة")
+    resp = requests.put(f"{STORAGE_URL}/objects/{path}",
+                        headers={"X-Storage-Key": key, "Content-Type": content_type},
+                        data=data, timeout=120)
+    if resp.status_code == 404:
+        key = init_storage(force=True)
+        resp = requests.put(f"{STORAGE_URL}/objects/{path}",
+                            headers={"X-Storage-Key": key, "Content-Type": content_type},
+                            data=data, timeout=120)
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=f"فشل الرفع: {resp.text[:120]}")
+    return resp.json()
+
+def _get_object(path: str) -> tuple[bytes, str]:
+    key = init_storage()
+    if not key: raise HTTPException(status_code=503, detail="خدمة التخزين غير متوفرة")
+    resp = requests.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key}, timeout=60)
+    if resp.status_code == 404:
+        # Try refresh once for stale key; if still 404, it's truly missing
+        key2 = init_storage(force=True)
+        if key2 and key2 != key:
+            resp = requests.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key2}, timeout=60)
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail="الملف غير موجود")
+    return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
 
 client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
@@ -1870,9 +1923,89 @@ async def update_settings(data: SettingsIn, user=Depends(require_perm("settings"
     return {"ok": True}
 
 
+# ================= FILES (Object storage) =================
+MAX_UPLOAD_MB = 25
+
+@api.post("/files/upload")
+async def upload_file(
+    file: UploadFile = File(...),
+    entity_type: Optional[str] = Query(None),
+    entity_id: Optional[str] = Query(None),
+    user=Depends(get_current_user),
+):
+    data = await file.read()
+    if len(data) > MAX_UPLOAD_MB * 1024 * 1024:
+        raise HTTPException(status_code=413, detail=f"حجم الملف أكبر من {MAX_UPLOAD_MB} ميجابايت")
+    name = (file.filename or "file").strip()
+    ext = name.rsplit(".", 1)[-1].lower() if "." in name else "bin"
+    path = f"{APP_NAME}/uploads/{user.get('id') or user.get('username')}/{uuid.uuid4()}.{ext}"
+    ct = file.content_type or "application/octet-stream"
+    result = _put_object(path, data, ct)
+    doc = {
+        "id": str(uuid.uuid4()),
+        "storage_path": result.get("path", path),
+        "original_filename": name,
+        "content_type": ct,
+        "size": result.get("size", len(data)),
+        "entity_type": entity_type or "general",
+        "entity_id": entity_id,
+        "uploaded_by": user.get("username"),
+        "is_deleted": False,
+        "created_at": now_iso(),
+    }
+    await db.files.insert_one(doc)
+    return clean_doc(doc)
+
+@api.get("/files")
+async def list_files(
+    entity_type: Optional[str] = None,
+    entity_id: Optional[str] = None,
+    user=Depends(get_current_user),
+):
+    q: Dict[str, Any] = {"is_deleted": False}
+    if entity_type: q["entity_type"] = entity_type
+    if entity_id: q["entity_id"] = entity_id
+    docs = await db.files.find(q).sort("created_at", -1).limit(500).to_list(500)
+    return [clean_doc(d) for d in docs]
+
+@api.get("/files/{fid}/download")
+async def download_file(fid: str, authorization: Optional[str] = Header(None), auth: Optional[str] = Query(None)):
+    # Accept auth via header OR ?auth=<jwt> so <img src> / <a href> can work without JS wrappers.
+    token = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+    elif auth:
+        token = auth
+    if not token: raise HTTPException(status_code=401, detail="مطلوب مصادقة")
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
+        u = await db.users.find_one({"id": payload.get("sub")})
+        if not u or u.get("status") == "disabled": raise Exception()
+    except Exception:
+        raise HTTPException(status_code=401, detail="جلسة غير صالحة")
+    rec = await db.files.find_one({"id": fid, "is_deleted": False})
+    if not rec: raise HTTPException(status_code=404, detail="الملف غير موجود")
+    data, ct = _get_object(rec["storage_path"])
+    return Response(content=data, media_type=rec.get("content_type") or ct,
+                    headers={"Content-Disposition": f'inline; filename="{rec.get("original_filename","file")}"'})
+
+@api.delete("/files/{fid}")
+async def delete_file(fid: str, user=Depends(get_current_user)):
+    rec = await db.files.find_one({"id": fid, "is_deleted": False})
+    if not rec: raise HTTPException(status_code=404, detail="الملف غير موجود")
+    await db.files.update_one({"id": fid}, {"$set": {"is_deleted": True, "deleted_at": now_iso(), "deleted_by": user.get("username")}})
+    return {"ok": True}
+
+
 # ================= STARTUP =================
 @app.on_event("startup")
 async def startup():
+    # Object storage
+    try:
+        if init_storage():
+            logger.info("Storage initialized")
+    except Exception as e:
+        logger.error(f"Storage init failed: {e}")
     # Indexes
     await db.users.create_index("username", unique=True)
     await db.customers.create_index("phone")

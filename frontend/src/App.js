@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import {
   LayoutDashboard, ShoppingCart, PackagePlus, Users, Truck, CreditCard,
   Boxes, Receipt, Ticket, BarChart3, UserCog, Bell, ScrollText, Settings,
-  Menu, Wifi, WifiOff, LogOut, Search
+  Menu, Wifi, WifiOff, LogOut, Search, FolderOpen
 } from "lucide-react";
 
 import Login from "@/pages/Login";
@@ -31,6 +31,7 @@ import AuditLog from "@/pages/AuditLog";
 import SettingsPage from "@/pages/Settings";
 import PublicOrder from "@/pages/PublicOrder";
 import BlockedCustomers from "@/pages/BlockedCustomers";
+import Files from "@/pages/Files";
 import "@/index.css";
 import api from "@/lib/api";
 
@@ -72,6 +73,7 @@ const menu = [
   { path: "/notifications", label: "الإشعارات", icon: Bell, perm: "dashboard" },
   { path: "/audit", label: "سجل العمليات", icon: ScrollText, perm: "users" },
   { path: "/settings", label: "الإعدادات", icon: Settings, perm: "settings" },
+  { path: "/files", label: "الملفات", icon: FolderOpen, perm: "dashboard" },
 ];
 
 function Shell({ children }) {
@@ -226,6 +228,7 @@ function AppRoutes() {
       <Route path="/audit" element={<Guard perm="users"><AuditLog /></Guard>} />
       <Route path="/blocked" element={<Guard perm="customers"><BlockedCustomers /></Guard>} />
       <Route path="/settings" element={<Guard perm="settings"><SettingsPage /></Guard>} />
+      <Route path="/files" element={<Guard perm="dashboard"><Files /></Guard>} />
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
   );
