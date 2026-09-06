@@ -356,6 +356,10 @@ async def list_customers(user=Depends(require_perm("customers"))):
 
 @api.post("/customers")
 async def create_customer(data: CustomerIn, user=Depends(require_perm("customers"))):
+    if (data.phone or "").strip():
+        exists = await db.customers.find_one({"phone": data.phone.strip()}, {"_id": 1})
+        if exists:
+            raise HTTPException(status_code=400, detail="رقم الهاتف مرتبط بحساب عميل آخر.")
     doc = data.model_dump()
     doc["id"] = str(uuid.uuid4())
     doc["password"] = data.password or random_password()
@@ -377,6 +381,12 @@ async def create_customer(data: CustomerIn, user=Depends(require_perm("customers
 
 @api.put("/customers/{cid}")
 async def update_customer(cid: str, data: CustomerIn, user=Depends(require_perm("customers"))):
+    if (data.phone or "").strip():
+        clash = await db.customers.find_one(
+            {"phone": data.phone.strip(), "id": {"$ne": cid}}, {"_id": 1}
+        )
+        if clash:
+            raise HTTPException(status_code=400, detail="رقم الهاتف مرتبط بحساب عميل آخر.")
     update = data.model_dump()
     if not data.password:
         update.pop("password", None)
@@ -671,6 +681,9 @@ async def register_request(data: RegisterRequest):
         raise HTTPException(status_code=400, detail="الاسم غير صحيح")
     if len(data.phone.strip()) < 7:
         raise HTTPException(status_code=400, detail="رقم الهاتف غير صحيح")
+    existing = await db.customers.find_one({"phone": data.phone.strip()}, {"_id": 1})
+    if existing:
+        raise HTTPException(status_code=400, detail="رقم الهاتف مرتبط بحساب عميل آخر.")
     doc = {
         "id": str(uuid.uuid4()), "full_name": data.full_name, "phone": data.phone,
         "address": data.address, "status": "pending", "created_at": now_iso(),
@@ -1658,10 +1671,10 @@ async def approve_register(rid: str, data: ApproveRegisterIn, user=Depends(requi
     if req.get("status") == "approved":
         raise HTTPException(status_code=400, detail="تمت الموافقة مسبقاً")
     # Check if phone already exists
-    exists = await db.customers.find_one({"phone": req["phone"]})
+    exists = await db.customers.find_one({"phone": req["phone"]}, {"_id": 1})
     if exists:
         await db.register_requests.update_one({"id": rid}, {"$set": {"status": "duplicate", "approved_at": now_iso()}})
-        raise HTTPException(status_code=400, detail="يوجد عميل بنفس الرقم")
+        raise HTTPException(status_code=400, detail="رقم الهاتف مرتبط بحساب عميل آخر.")
     doc = {
         "id": str(uuid.uuid4()), "name": req["full_name"], "phone": req["phone"],
         "address": req.get("address", ""), "password": data.password or random_password(),

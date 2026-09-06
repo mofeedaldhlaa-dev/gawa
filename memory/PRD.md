@@ -5,6 +5,15 @@ Owner: mofeedaldhlaa@gmail.com • 784225716 • المخاء
 ## Stack
 FastAPI + MongoDB + React (RTL) + JWT + IndexedDB + wa.me
 
+## Delivered v2.2 (2026-02-06) — Duplicate customer phone guard
+- Added a single lightweight `find_one({"phone": ..., "_id": 1})` check to all three customer-creation paths:
+  - `POST /api/customers` (admin add) — reject with **«رقم الهاتف مرتبط بحساب عميل آخر.»**
+  - `PUT /api/customers/{cid}` (admin edit) — checks phone belongs to a DIFFERENT id (`$ne` filter) so saving the same customer with its own phone still works.
+  - `POST /api/public/customer/register-request` (customer self-register) — reject before creating a pending request.
+  - `POST /api/register-requests/{rid}/approve` — standardized its existing duplicate error to the same wording.
+- Cost: 1 indexed lookup per write; zero impact on reads, login, or any other flow.
+- Tested: duplicate rejected (400 + exact message), unique passed (200), update to own phone passed (200), public self-register with existing phone rejected (400).
+
 ## Delivered v2.1 (2026-02-06) — Phone-based fingerprint + contact CS button
 - **`phoneFingerprint()`** helper in `lib/utils.js`: async SHA-256 hash over hardware-only signals — `navigator.platform`, `screen.WxHxColorDepth`, `devicePixelRatio`, timezone, `hardwareConcurrency`, `deviceMemory`, `maxTouchPoints`, `userAgentData.platform`. Deliberately excludes userAgent and canvas (both vary per browser). Result is stable across DIFFERENT BROWSERS on the SAME phone; changes only when the actual phone changes. Falls back to a DJB2 hash if SubtleCrypto is unavailable.
 - **`PublicOrder.jsx`** now uses `phoneFingerprint()` instead of the browser-localStorage `deviceId()`. When the backend returns 403 with a message starting with «الهاتف غير مرتبط» the UI now shows the standard red error AND a large green button **«إرسال لخدمة العملاء»** (`data-testid=po-contact-cs-device`). Clicking it opens WhatsApp to `ADMIN_WHATSAPP` (784225716) with a pre-filled request that includes the account phone and timestamp, and toasts «تم إرسال طلبك إلى خدمة العملاء، وسيتم التواصل معك لإكمال عملية ربط الهاتف».
