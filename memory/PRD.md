@@ -5,6 +5,11 @@ Owner: mofeedaldhlaa@gmail.com • 784225716 • المخاء
 ## Stack
 FastAPI + MongoDB + React (RTL) + JWT + IndexedDB + wa.me
 
+## Delivered v2.5 (2026-02-06) — Backup email setting
+- **Backend**: `SettingsIn` gains an optional `backup_email` field. `POST /api/settings` validates the address at the API boundary (`^[^\s@]+@[^\s@]+\.[^\s@]+$`) and returns 400 «البريد الإلكتروني غير صحيح» on bad input; empty string is accepted to clear the setting. `GET /api/settings` echoes the saved value (default `""`).
+- **Settings.jsx**: dedicated field «البريد الإلكتروني للنسخ الاحتياطية» inside the backup card, with its own **«حفظ البريد الإلكتروني»** button (`data-testid=backup-email-save`) that only PATCHes `{backup_email}` — no full-settings roundtrip, no backup trigger. On success shows the exact toast «تم حفظ البريد الإلكتروني بنجاح.»; on invalid input shows «البريد الإلكتروني غير صحيح. يرجى إدخال بريد إلكتروني صالح.». Value is loaded once on page mount from `/settings`.
+- Cost: **1 write per save, 0 extra reads**. No new endpoints. The stored email will be picked up automatically by the future auto-backup email job (already in the roadmap).
+
 ## Delivered v2.4 (2026-02-06) — Split low-stock alerts (numbered vs quantity)
 - **Backend** (`/api/reports/dashboard`): each alert now carries a `type: 'numbered' | 'quantity'`. Per-category thresholds come from `low_stock_numbered` and `low_stock_quantity` (already editable in `/categories`) with fallback to `low_stock_threshold`. Numbered stock is compared to numbered threshold, quantity stock to quantity threshold — never mixed. Same single loop, still 0 extra queries.
 - **Dashboard.jsx**: alerts render in TWO independent blocks stacked vertically — «🔴 كروت مرقمة – مخزون منخفض» and «🔴 كروت كمية – مخزون منخفض» — each with its own count badge. A block hides itself when its list is empty. Each card links to `/stock?category=<id>&type=<numbered|quantity>` so the target page can pre-filter. Data-testids: `low-stock-alerts` (wrapper), `low-stock-numbered`, `low-stock-quantity`, `low-stock-<type>-<id>`.

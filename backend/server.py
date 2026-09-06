@@ -276,6 +276,7 @@ class SettingsIn(BaseModel):
     low_stock_default: Optional[int] = None
     currency: Optional[str] = None
     logo_url: Optional[str] = None
+    backup_email: Optional[str] = None
 
 
 # ================= AUTH =================
@@ -1847,11 +1848,20 @@ async def get_settings(user=Depends(get_current_user)):
         "currency": doc.get("currency", "ريال"),
         "logo_url": doc.get("logo_url", ""),
         "low_stock_default": doc.get("low_stock_default", 20),
+        "backup_email": doc.get("backup_email", ""),
     }
 
 @api.post("/settings")
 async def update_settings(data: SettingsIn, user=Depends(require_perm("settings"))):
     update = {k: v for k, v in data.model_dump().items() if v is not None}
+    # Validate backup_email format at the API boundary
+    if "backup_email" in update:
+        v = (update["backup_email"] or "").strip()
+        if v:
+            import re
+            if not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", v):
+                raise HTTPException(status_code=400, detail="البريد الإلكتروني غير صحيح")
+        update["backup_email"] = v
     await db.settings.update_one({"key": "app_settings"}, {"$set": update}, upsert=True)
     return {"ok": True}
 
