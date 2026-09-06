@@ -7,9 +7,8 @@ import { Link } from "react-router-dom";
 import { fmt, fmtDate, openWhatsApp, buildInvoiceMessage } from "@/lib/utils";
 import { printSaleInvoice } from "@/lib/print";
 import { useAuth } from "@/lib/auth";
-import { Plus, Search, Printer, MessageCircle, Eye } from "lucide-react";
+import { Plus, Search, Printer, MessageCircle, Eye, Edit } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 
 export default function Sales() {
@@ -18,7 +17,6 @@ export default function Sales() {
   const [customers, setCustomers] = useState([]);
   const [q, setQ] = useState("");
   const [viewing, setViewing] = useState(null);
-  const [editing, setEditing] = useState(null);
   const [settings, setSettings] = useState({ company_name: "شبكة جواد نت اللاسلكية" });
 
   const load = () => api.get("/sales", { params: { q } }).then((r) => setItems(r.data));
@@ -31,13 +29,6 @@ export default function Sales() {
   const doPrint = (s) => {
     const customer = customers.find((c) => c.id === s.customer_id);
     printSaleInvoice({ sale: s, customer, username: user?.name || user?.username });
-  };
-
-  const saveEdit = async () => {
-    try {
-      await api.put(`/sales/${editing.id}`, { discount: Number(editing.discount), paid: Number(editing.paid), notes: editing.notes });
-      toast.success("تم التعديل"); setEditing(null); load();
-    } catch (e) { toast.error(errText(e)); }
   };
 
   const sendWA = (s) => {
@@ -72,7 +63,7 @@ export default function Sales() {
                 <td className="p-3 num font-bold text-amber-700">{fmt(s.remaining)}</td>
                 <td className="p-3 no-print flex gap-1">
                   <Button size="sm" variant="outline" onClick={() => setViewing(s)} data-testid={`sale-view-${s.id}`}><Eye size={12}/></Button>
-                  <Button size="sm" variant="outline" onClick={() => setEditing({ id: s.id, discount: s.discount, paid: s.paid, notes: s.notes || "" })} data-testid={`sale-edit-${s.id}`}>تعديل</Button>
+                  <Link to={`/sales/${s.id}/edit`}><Button size="sm" variant="outline" data-testid={`sale-edit-${s.id}`}><Edit size={12}/></Button></Link>
                   <Button size="sm" variant="outline" onClick={() => doPrint(s)} data-testid={`sale-print-${s.id}`}><Printer size={12}/></Button>
                   <Button size="sm" variant="outline" onClick={() => sendWA(s)} data-testid={`sale-wa-${s.id}`}><MessageCircle size={12} className="text-green-600"/></Button>
                 </td>
@@ -97,7 +88,7 @@ export default function Sales() {
             </div>
             <div className="flex flex-wrap gap-1 mt-2">
               <Button size="sm" variant="outline" onClick={() => setViewing(s)}><Eye size={12} className="ml-1"/> عرض</Button>
-              <Button size="sm" variant="outline" onClick={() => setEditing({ id: s.id, discount: s.discount, paid: s.paid, notes: s.notes || "" })}>تعديل</Button>
+              <Link to={`/sales/${s.id}/edit`}><Button size="sm" variant="outline"><Edit size={12} className="ml-1"/> تعديل</Button></Link>
               <Button size="sm" variant="outline" onClick={() => doPrint(s)}><Printer size={12} className="ml-1"/> طباعة</Button>
               <Button size="sm" variant="outline" onClick={() => sendWA(s)}><MessageCircle size={12} className="ml-1 text-green-600"/> واتساب</Button>
             </div>
@@ -124,23 +115,11 @@ export default function Sales() {
                 <div className="flex justify-between"><span>المدفوع</span><span className="num">{fmt(viewing.paid)}</span></div>
                 <div className="flex justify-between"><span>المتبقي</span><span className="num font-bold text-amber-700">{fmt(viewing.remaining)}</span></div>
               </div>
-              <div className="flex gap-2 pt-2">
-                <Button onClick={() => doPrint(viewing)} className="bg-[#221340] flex-1"><Printer size={14} className="ml-1"/> طباعة</Button>
-                <Button onClick={() => sendWA(viewing)} variant="outline" className="border-green-600 text-green-700 flex-1"><MessageCircle size={14} className="ml-1"/> واتساب</Button>
+              <div className="flex gap-2 pt-2 flex-wrap">
+                <Button onClick={() => doPrint(viewing)} className="bg-[#221340] flex-1 min-w-[120px]"><Printer size={14} className="ml-1"/> طباعة</Button>
+                <Button onClick={() => sendWA(viewing)} variant="outline" className="border-green-600 text-green-700 flex-1 min-w-[120px]"><MessageCircle size={14} className="ml-1"/> واتساب</Button>
+                <Link to={`/sales/${viewing.id}/edit`} className="flex-1 min-w-[120px]"><Button variant="outline" className="w-full"><Edit size={14} className="ml-1"/> تعديل الفاتورة</Button></Link>
               </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-      <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>تعديل الفاتورة</DialogTitle></DialogHeader>
-          {editing && (
-            <div className="space-y-3">
-              <div><Label>الخصم</Label><Input type="number" value={editing.discount} onChange={(e) => setEditing({ ...editing, discount: e.target.value })} data-testid="edit-sale-discount"/></div>
-              <div><Label>المدفوع</Label><Input type="number" value={editing.paid} onChange={(e) => setEditing({ ...editing, paid: e.target.value })} data-testid="edit-sale-paid"/></div>
-              <div><Label>ملاحظات</Label><Input value={editing.notes} onChange={(e) => setEditing({ ...editing, notes: e.target.value })}/></div>
-              <Button onClick={saveEdit} className="w-full bg-[#221340]" data-testid="edit-sale-save">حفظ التعديل</Button>
             </div>
           )}
         </DialogContent>

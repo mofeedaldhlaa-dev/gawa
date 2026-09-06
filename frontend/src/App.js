@@ -208,8 +208,10 @@ function AppRoutes() {
       <Route path="/" element={<Guard perm="dashboard"><Dashboard /></Guard>} />
       <Route path="/sales" element={<Guard perm="sales"><Sales /></Guard>} />
       <Route path="/sales/new" element={<Guard perm="sales"><SaleForm /></Guard>} />
+      <Route path="/sales/:id/edit" element={<Guard perm="edit_ops"><SaleForm /></Guard>} />
       <Route path="/purchases" element={<Guard perm="purchases"><Purchases /></Guard>} />
       <Route path="/purchases/new" element={<Guard perm="purchases"><PurchaseForm /></Guard>} />
+      <Route path="/purchases/:id/edit" element={<Guard perm="edit_ops"><PurchaseForm /></Guard>} />
       <Route path="/customers" element={<Guard perm="customers"><Customers /></Guard>} />
       <Route path="/customers/:id" element={<Guard perm="customers"><CustomerStatement /></Guard>} />
       <Route path="/suppliers" element={<Guard perm="suppliers"><Suppliers /></Guard>} />

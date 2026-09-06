@@ -87,6 +87,26 @@ function RevealButton({ id }) {
              : <Button size="sm" variant="outline" onClick={reveal} data-testid={`cust-reveal-${id}`}><Eye size={12}/></Button>;
 }
 
+// Mobile-friendly inline reveal: shows dots + explicit label button that toggles
+function RevealButtonInline({ id, testid }) {
+  const [pwd, setPwd] = useState(null);
+  const toggle = async () => {
+    if (pwd) { setPwd(null); return; }
+    try { const r = await api.get(`/customers/${id}/password`); setPwd(r.data.password); }
+    catch (e) { toast.error(errText(e)); }
+  };
+  return (
+    <div className="flex items-center gap-2 flex-wrap justify-end">
+      <span className="font-mono text-sm bg-slate-100 px-2 py-1 rounded select-all break-all" data-testid={`${testid}-value`}>
+        {pwd || "••••••••"}
+      </span>
+      <Button size="sm" variant="outline" onClick={toggle} data-testid={testid}>
+        <Eye size={12} className="ml-1"/> {pwd ? "إخفاء" : "مشاهدة"}
+      </Button>
+    </div>
+  );
+}
+
 export default function Customers() {
   const [items, setItems] = useState([]);
   const [q, setQ] = useState("");
@@ -160,13 +180,13 @@ export default function Customers() {
         </div>
         <div className="md:hidden divide-y">
           {filtered.map((c) => (
-            <div key={c.id} className="p-3">
-              <div className="flex justify-between items-start">
-                <div>
-                  <div className="font-bold">{c.name} <span className="text-xs text-slate-500">({(c.customer_type||'customer')==='pos'?'نقطة بيع':'عميل'})</span></div>
-                  <div className="text-xs text-slate-500">{c.phone}</div>
+            <div key={c.id} className="p-3" data-testid={`cust-card-${c.id}`}>
+              <div className="flex justify-between items-start gap-2">
+                <div className="min-w-0">
+                  <div className="font-bold truncate">{c.name} <span className="text-xs text-slate-500">({(c.customer_type||'customer')==='pos'?'نقطة بيع':'عميل'})</span></div>
+                  <div className="text-xs text-slate-500 truncate">{c.phone}</div>
                 </div>
-                <div className="flex gap-1">
+                <div className="flex gap-1 shrink-0">
                   <Link to={`/customers/${c.id}`}><Button size="sm" variant="outline"><FileText size={14} /></Button></Link>
                   <Button size="sm" variant="outline" onClick={() => { setEdit(c); setOpen(true); }}><Edit size={14} /></Button>
                   <Button size="sm" variant="outline" onClick={() => setPwdCustomer(c)}><KeyRound size={14} /></Button>
@@ -176,6 +196,10 @@ export default function Customers() {
                 <div><div className="text-slate-500">السقف</div><div className="num font-bold">{fmt(c.credit_limit)}</div></div>
                 <div><div className="text-slate-500">المديونية</div><div className="num font-bold">{fmt(c.balance)}</div></div>
                 <div><div className="text-slate-500">المتاح</div><div className="num font-bold text-green-700">{fmt(Math.max(0, (c.credit_limit || 0) - (c.balance || 0)))}</div></div>
+              </div>
+              <div className="mt-2 pt-2 border-t flex items-center justify-between gap-2 flex-wrap">
+                <span className="text-xs text-slate-500 shrink-0">كلمة المرور</span>
+                <RevealButtonInline id={c.id} testid={`cust-reveal-m-${c.id}`} />
               </div>
             </div>
           ))}

@@ -6,13 +6,17 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { fmt, genUUID, deviceId } from "@/lib/utils";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Save } from "lucide-react";
 
 export default function PurchaseForm() {
   const nav = useNavigate();
+  const { id: editId } = useParams();
+  const isEdit = !!editId;
+
   const [cats, setCats] = useState([]);
   const [sups, setSups] = useState([]);
   const [supplierId, setSupplierId] = useState("");
@@ -21,41 +25,90 @@ export default function PurchaseForm() {
   const [paid, setPaid] = useState(0);
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false);
-  useEffect(() => { api.get("/categories").then((r) => setCats(r.data)); api.get("/suppliers").then((r) => setSups(r.data)); }, []);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [origNumber, setOrigNumber] = useState("");
+
+  useEffect(() => {
+    api.get("/categories").then((r) => setCats(r.data));
+    api.get("/suppliers").then((r) => setSups(r.data));
+  }, []);
+
+  useEffect(() => {
+    if (!isEdit) return;
+    api.get(`/purchases/${editId}`).then((r) => {
+      const p = r.data;
+      setOrigNumber(p.number || "");
+      setSupplierId(p.supplier_id || "");
+      setDiscount(p.discount || 0);
+      setPaid(p.paid || 0);
+      setNotes(p.notes || "");
+      setItems((p.items || []).map((it) => ({
+        category_id: it.category_id, quantity: it.quantity, price: it.price,
+        use_numbered: !!it.use_numbered,
+        card_numbers_text: (it.card_numbers || []).join("\n"),
+      })));
+    }).catch((e) => { toast.error(errText(e)); nav("/purchases"); });
+  }, [editId]);
+
   const update = (i, k, v) => {
     const c = [...items]; c[i] = { ...c[i], [k]: v };
     if (k === "category_id") { const cat = cats.find(x => x.id === v); if (cat) c[i].price = cat.purchase_price; }
     setItems(c);
   };
+
   const subtotal = items.reduce((s, i) => {
     const q = i.use_numbered ? (i.card_numbers_text || "").split(/\r?\n/).filter((x) => x.trim()).length : Number(i.quantity) || 0;
     return s + q * (Number(i.price) || 0);
   }, 0);
   const total = subtotal - (Number(discount) || 0);
-  const submit = async () => {
+
+  const payload = () => {
+    const supplier = sups.find((s) => s.id === supplierId);
+    const finalItems = items.map((i) => {
+      const nums = (i.card_numbers_text || "").split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+      const q = i.use_numbered ? nums.length : Number(i.quantity);
+      return {
+        category_id: i.category_id, quantity: q, price: Number(i.price),
+        category_name: cats.find((c) => c.id === i.category_id)?.name || "",
+        use_numbered: i.use_numbered, card_numbers: i.use_numbered ? nums : [],
+      };
+    });
+    return {
+      supplier_id: supplierId || null, supplier_name: supplier?.name || "",
+      items: finalItems, discount: Number(discount) || 0, paid: Number(paid) || 0, notes,
+    };
+  };
+
+  const submitCreate = async () => {
     setLoading(true);
     try {
-      const supplier = sups.find((s) => s.id === supplierId);
-      const finalItems = items.map((i) => {
-        const nums = (i.card_numbers_text || "").split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
-        const q = i.use_numbered ? nums.length : Number(i.quantity);
-        return {
-          category_id: i.category_id, quantity: q, price: Number(i.price),
-          category_name: cats.find((c) => c.id === i.category_id)?.name || "",
-          use_numbered: i.use_numbered, card_numbers: i.use_numbered ? nums : [],
-        };
-      });
-      await api.post("/purchases", {
-        supplier_id: supplierId || null, supplier_name: supplier?.name || "",
-        items: finalItems, discount: Number(discount) || 0, paid: Number(paid) || 0, notes,
-        idempotency_key: genUUID(), device_id: deviceId(),
-      });
+      await api.post("/purchases", { ...payload(), idempotency_key: genUUID(), device_id: deviceId() });
       toast.success("تم الحفظ"); nav("/purchases");
     } catch (e) { toast.error(errText(e)); }
     setLoading(false);
   };
+  const submitEdit = async () => {
+    setConfirmOpen(false);
+    setLoading(true);
+    try {
+      await api.put(`/purchases/${editId}`, payload());
+      toast.success(`تم تعديل الفاتورة ${origNumber}`); nav("/purchases");
+    } catch (e) { toast.error(errText(e)); }
+    setLoading(false);
+  };
+  const submit = () => {
+    if (items.some((i) => !i.category_id)) { toast.error("أكمل بيانات الأصناف"); return; }
+    if (isEdit) setConfirmOpen(true);
+    else submitCreate();
+  };
+
   return (
     <Card className="p-4 md:p-6 space-y-4 max-w-4xl" data-testid="purchase-form">
+      {isEdit && (
+        <div className="bg-amber-50 border border-amber-200 rounded p-3 text-sm">
+          وضع التعديل — فاتورة مشتريات رقم <span className="font-mono font-bold text-[#452480]" data-testid="purch-edit-number">{origNumber}</span>
+        </div>
+      )}
       <div>
         <Label>المورد</Label>
         <Select value={supplierId} onValueChange={setSupplierId}>
@@ -93,7 +146,23 @@ export default function PurchaseForm() {
         <div><Label>المتبقي</Label><div className="h-10 flex items-center px-3 bg-slate-100 rounded num font-bold">{fmt(total - paid)}</div></div>
       </div>
       <Textarea placeholder="ملاحظات" value={notes} onChange={(e) => setNotes(e.target.value)}/>
-      <Button onClick={submit} disabled={loading} className="bg-[#221340]" data-testid="purch-save">{loading?"جاري...":"حفظ"}</Button>
+      <Button onClick={submit} disabled={loading} className="bg-[#221340] w-full sm:w-auto" data-testid="purch-save"><Save size={16} className="ml-1"/> {loading ? "جاري..." : (isEdit ? "حفظ التعديل" : "حفظ")}</Button>
+
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>تأكيد حفظ تعديلات فاتورة المشتريات {origNumber}</AlertDialogTitle>
+            <AlertDialogDescription>
+              سيؤدي حفظ التعديل إلى تحديث المخزون وحساب المورد والمديونية وإجمالي المشتريات
+              وتكلفة المخزون والتقارير المرتبطة بالفاتورة. لا يتراجع النظام تلقائياً بعد الحفظ.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="purch-edit-cancel">إلغاء</AlertDialogCancel>
+            <AlertDialogAction onClick={submitEdit} className="bg-[#221340]" data-testid="purch-edit-confirm">تأكيد وحفظ</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }

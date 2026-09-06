@@ -136,11 +136,31 @@ export default function PublicOrder() {
             <div><Label>الفئة</Label>
               <Select value={category_id} onValueChange={setCategoryId}>
                 <SelectTrigger data-testid="po-cat"><SelectValue placeholder="اختر"/></SelectTrigger>
-                <SelectContent>{cats.map((c) => <SelectItem key={c.id} value={c.id}>{c.name} - {fmt(c.sale_price)}</SelectItem>)}</SelectContent>
+                <SelectContent>{cats.map((c) => <SelectItem key={c.id} value={c.id}>{c.name} - {fmt(c.sale_price)} • متوفر {c.available_numbered ?? 0}</SelectItem>)}</SelectContent>
               </Select>
+              {category_id && (() => {
+                const c = cats.find((x) => x.id === category_id);
+                const avail = c?.available_numbered ?? 0;
+                return (
+                  <div className={`text-xs mt-1 ${avail > 0 ? "text-slate-500" : "text-red-600"}`} data-testid="po-cat-availability">
+                    الكروت المرقمة المتوفرة: <span className="num font-bold">{avail}</span>
+                  </div>
+                );
+              })()}
             </div>
             <div><Label>الكمية</Label><Input type="number" min="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} data-testid="po-qty"/></div>
-            <Button onClick={request} disabled={loading} className="w-full bg-[#D4AF37] text-[#1A0F33] font-bold hover:bg-[#C5A028] text-lg py-6" data-testid="po-request">طلب</Button>
+            {(() => {
+              const c = cats.find((x) => x.id === category_id);
+              const avail = c?.available_numbered ?? 0;
+              const insufficient = category_id && Number(quantity) > 0 && Number(quantity) > avail;
+              return insufficient ? (
+                <div className="flex items-start gap-2 rounded-md border border-red-300 bg-red-50 text-red-700 px-3 py-2 text-sm" data-testid="po-no-stock" role="alert">
+                  <AlertCircle size={16} className="mt-0.5 shrink-0"/>
+                  <span>لا تتوفر كمية الكروت المطلوبة</span>
+                </div>
+              ) : null;
+            })()}
+            <Button onClick={request} disabled={loading || (() => { const c = cats.find((x) => x.id === category_id); const avail = c?.available_numbered ?? 0; return !category_id || Number(quantity) < 1 || Number(quantity) > avail; })()} className="w-full bg-[#D4AF37] text-[#1A0F33] font-bold hover:bg-[#C5A028] text-lg py-6 disabled:opacity-50" data-testid="po-request">طلب</Button>
           </div>
         )}
 
@@ -164,7 +184,6 @@ export default function PublicOrder() {
                 </div>
               </Card>
             )}
-            {result.quantity_from_stock > 0 && <div className="text-center text-sm text-slate-600">تم تجهيز <span className="font-bold">{result.quantity_from_stock}</span> كرت من المخزون</div>}
             <div className="text-center text-sm">
               <div className="text-slate-500">المديونية بعد العملية</div>
               <div className="text-2xl font-bold num">{fmt(result.balance_after)}</div>

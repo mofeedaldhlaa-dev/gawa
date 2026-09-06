@@ -2,12 +2,10 @@ import { useEffect, useState } from "react";
 import api, { errText } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Link } from "react-router-dom";
 import { fmt, fmtDate } from "@/lib/utils";
-import { Plus, Printer, Eye } from "lucide-react";
+import { Plus, Printer, Eye, Edit } from "lucide-react";
 import { toast } from "sonner";
 import { printPurchase } from "@/lib/print";
 import { useAuth } from "@/lib/auth";
@@ -17,7 +15,6 @@ export default function Purchases() {
   const [items, setItems] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
   const [viewing, setViewing] = useState(null);
-  const [editing, setEditing] = useState(null);
 
   const load = () => api.get("/purchases").then((r) => setItems(r.data));
   useEffect(() => { load(); api.get("/suppliers").then((r) => setSuppliers(r.data)); }, []);
@@ -25,13 +22,6 @@ export default function Purchases() {
   const doPrint = (p) => {
     const supplier = suppliers.find((s) => s.id === p.supplier_id);
     printPurchase({ purchase: p, supplier, username: user?.name || user?.username });
-  };
-
-  const saveEdit = async () => {
-    try {
-      await api.put(`/purchases/${editing.id}`, { discount: Number(editing.discount), paid: Number(editing.paid), notes: editing.notes });
-      toast.success("تم التعديل"); setEditing(null); load();
-    } catch (e) { toast.error(errText(e)); }
   };
 
   return (
@@ -51,7 +41,7 @@ export default function Purchases() {
                 <td className="p-3 num text-amber-700">{fmt(p.remaining)}</td>
                 <td className="p-3 no-print flex gap-1">
                   <Button size="sm" variant="outline" onClick={() => setViewing(p)} data-testid={`purch-view-${p.id}`}><Eye size={12}/></Button>
-                  <Button size="sm" variant="outline" onClick={() => setEditing({ id: p.id, discount: p.discount, paid: p.paid, notes: p.notes || "" })} data-testid={`purch-edit-${p.id}`}>تعديل</Button>
+                  <Link to={`/purchases/${p.id}/edit`}><Button size="sm" variant="outline" data-testid={`purch-edit-${p.id}`}><Edit size={12}/></Button></Link>
                   <Button size="sm" variant="outline" onClick={() => doPrint(p)} data-testid={`purch-print-${p.id}`}><Printer size={12}/></Button>
                 </td>
               </tr>
@@ -75,7 +65,7 @@ export default function Purchases() {
             </div>
             <div className="flex flex-wrap gap-1 mt-2">
               <Button size="sm" variant="outline" onClick={() => setViewing(p)}><Eye size={12} className="ml-1"/> عرض</Button>
-              <Button size="sm" variant="outline" onClick={() => setEditing({ id: p.id, discount: p.discount, paid: p.paid, notes: p.notes || "" })}>تعديل</Button>
+              <Link to={`/purchases/${p.id}/edit`}><Button size="sm" variant="outline"><Edit size={12} className="ml-1"/> تعديل</Button></Link>
               <Button size="sm" variant="outline" onClick={() => doPrint(p)}><Printer size={12} className="ml-1"/> طباعة</Button>
             </div>
           </Card>
@@ -101,25 +91,15 @@ export default function Purchases() {
                 <div className="flex justify-between"><span>المدفوع</span><span className="num">{fmt(viewing.paid)}</span></div>
                 <div className="flex justify-between"><span>المتبقي</span><span className="num font-bold text-amber-700">{fmt(viewing.remaining)}</span></div>
               </div>
-              <Button onClick={() => doPrint(viewing)} className="bg-[#221340] w-full mt-2"><Printer size={14} className="ml-1"/> طباعة</Button>
+              <div className="flex gap-2 mt-2 flex-wrap">
+                <Button onClick={() => doPrint(viewing)} className="bg-[#221340] flex-1 min-w-[120px]"><Printer size={14} className="ml-1"/> طباعة</Button>
+                <Link to={`/purchases/${viewing.id}/edit`} className="flex-1 min-w-[120px]"><Button variant="outline" className="w-full"><Edit size={14} className="ml-1"/> تعديل الفاتورة</Button></Link>
+              </div>
             </div>
           )}
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>تعديل فاتورة المشتريات</DialogTitle></DialogHeader>
-          {editing && (
-            <div className="space-y-3">
-              <div><Label>الخصم</Label><Input type="number" value={editing.discount} onChange={(e) => setEditing({ ...editing, discount: e.target.value })} data-testid="edit-purch-discount"/></div>
-              <div><Label>المدفوع</Label><Input type="number" value={editing.paid} onChange={(e) => setEditing({ ...editing, paid: e.target.value })} data-testid="edit-purch-paid"/></div>
-              <div><Label>ملاحظات</Label><Input value={editing.notes} onChange={(e) => setEditing({ ...editing, notes: e.target.value })}/></div>
-              <Button onClick={saveEdit} className="w-full bg-[#221340]" data-testid="edit-purch-save">حفظ التعديل</Button>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

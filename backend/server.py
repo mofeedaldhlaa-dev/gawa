@@ -883,9 +883,33 @@ async def cancel_sale(sid: str, user=Depends(require_perm("delete_ops"))):
 
 
 class SaleEditIn(BaseModel):
+    # legacy quick edit (still supported for partial updates)
     discount: Optional[float] = None
     paid: Optional[float] = None
     notes: Optional[str] = None
+    # full edit (optional). When provided we reverse the old inventory/balance
+    # effect and re-apply the new one atomically.
+    customer_id: Optional[str] = None
+    customer_name: Optional[str] = None
+    sale_type: Optional[str] = None
+    items: Optional[List[SaleItemIn]] = None
+
+
+async def _reverse_sale_inventory(items: list):
+    for it in items or []:
+        cards = it.get("card_numbers") or []
+        if cards:
+            await db.cards.update_many(
+                {"number": {"$in": cards}},
+                {"$set": {"status": "available", "sold_at": None, "sold_to": None}},
+            )
+        residual = int(it.get("quantity", 0)) - len(cards)
+        if residual > 0:
+            await db.stock.update_one(
+                {"category_id": it.get("category_id")},
+                {"$inc": {"sold": -residual}},
+            )
+
 
 @api.put("/sales/{sid}")
 async def edit_sale(sid: str, data: SaleEditIn, user=Depends(require_perm("edit_ops"))):
@@ -893,6 +917,107 @@ async def edit_sale(sid: str, data: SaleEditIn, user=Depends(require_perm("edit_
     if not doc: raise HTTPException(status_code=404, detail="غير موجود")
     if doc.get("status") != "active":
         raise HTTPException(status_code=400, detail="لا يمكن تعديل فاتورة ملغاة")
+
+    # --------- FULL EDIT PATH (items provided) ---------
+    if data.items is not None:
+        new_customer_id = data.customer_id or doc.get("customer_id")
+        new_sale_type = data.sale_type or doc.get("sale_type", "credit")
+        if new_sale_type not in ("cash", "credit"):
+            raise HTTPException(status_code=400, detail="نوع الفاتورة غير صحيح")
+        # 1) reverse OLD inventory + balance
+        await _reverse_sale_inventory(doc.get("items") or [])
+        if doc.get("customer_id") and doc.get("remaining", 0):
+            await _adjust_party_balance(
+                "customer", doc["customer_id"], -float(doc.get("remaining") or 0),
+                doc["number"], f"عكس تأثير الفاتورة {doc['number']} للتعديل",
+            )
+        # 2) compute new totals
+        subtotal = 0.0
+        items_final = []
+        for it in data.items:
+            line_total = it.quantity * it.price
+            subtotal += line_total
+            items_final.append({**it.model_dump(), "total": line_total})
+        new_discount = float(data.discount if data.discount is not None else doc.get("discount", 0) or 0)
+        new_paid = float(data.paid if data.paid is not None else doc.get("paid", 0) or 0)
+        new_total = subtotal - new_discount
+        new_remaining = new_total - new_paid
+        # 3) credit limit check on new customer
+        if new_customer_id and new_remaining > 0:
+            cust = await db.customers.find_one({"id": new_customer_id})
+            if cust:
+                limit = cust.get("credit_limit", 0)
+                if limit and cust.get("balance", 0) + new_remaining > limit:
+                    # rollback the reversal we just did to keep DB consistent
+                    if doc.get("customer_id") and doc.get("remaining", 0):
+                        await _adjust_party_balance(
+                            "customer", doc["customer_id"], float(doc.get("remaining") or 0),
+                            doc["number"], f"استرجاع تأثير الفاتورة {doc['number']} بعد فشل التعديل",
+                        )
+                    # restore inventory
+                    for it in doc.get("items") or []:
+                        cards = it.get("card_numbers") or []
+                        if cards:
+                            await db.cards.update_many(
+                                {"number": {"$in": cards}},
+                                {"$set": {"status": "sold", "sold_to": doc.get("customer_id")}},
+                            )
+                        residual = int(it.get("quantity", 0)) - len(cards)
+                        if residual > 0:
+                            await db.stock.update_one({"category_id": it.get("category_id")}, {"$inc": {"sold": residual}})
+                    raise HTTPException(status_code=400, detail=f"لا يمكن تنفيذ التعديل لأنه يتجاوز سقف حساب العميل ({limit})")
+        # 4) apply NEW inventory (same rules as create_sale)
+        for item in data.items:
+            if item.use_numbered and item.card_numbers:
+                for n in item.card_numbers:
+                    card = await db.cards.find_one({"number": n, "status": "available"})
+                    if not card:
+                        raise HTTPException(status_code=400, detail=f"الكرت {n} غير متوفر")
+                await db.cards.update_many(
+                    {"number": {"$in": item.card_numbers}, "status": "available"},
+                    {"$set": {"status": "sold", "sold_at": now_iso(), "sold_to": new_customer_id}},
+                )
+            else:
+                stock = await db.stock.find_one({"category_id": item.category_id})
+                avail = (stock or {}).get("total", 0) - (stock or {}).get("sold", 0) if stock else 0
+                numbered_avail = await db.cards.count_documents({"category_id": item.category_id, "status": "available"})
+                if avail + numbered_avail < item.quantity:
+                    raise HTTPException(status_code=400, detail=f"الكمية غير متوفرة للفئة")
+                take_from_qty = min(item.quantity, avail)
+                if take_from_qty > 0:
+                    await db.stock.update_one({"category_id": item.category_id}, {"$inc": {"sold": take_from_qty}})
+                take_from_numbered = item.quantity - take_from_qty
+                if take_from_numbered > 0:
+                    pending = await db.cards.find({"category_id": item.category_id, "status": "available"}).limit(take_from_numbered).to_list(take_from_numbered)
+                    ids = [c["id"] for c in pending]
+                    await db.cards.update_many({"id": {"$in": ids}}, {"$set": {"status": "sold", "sold_at": now_iso(), "sold_to": new_customer_id}})
+        # 5) apply NEW balance
+        balance_after = None
+        if new_customer_id and new_remaining > 0:
+            balance_after = await _adjust_party_balance(
+                "customer", new_customer_id, new_remaining,
+                doc["number"], f"تعديل فاتورة {doc['number']}",
+            )
+        # 6) update the doc, keep same id + number + created_at
+        cust_name = data.customer_name
+        if new_customer_id and not cust_name:
+            _c = await db.customers.find_one({"id": new_customer_id})
+            cust_name = (_c or {}).get("name", doc.get("customer_name") or "")
+        update = {
+            "customer_id": new_customer_id, "customer_name": cust_name or doc.get("customer_name"),
+            "sale_type": new_sale_type, "items": items_final,
+            "subtotal": subtotal, "discount": new_discount, "total": new_total,
+            "paid": new_paid, "remaining": new_remaining,
+            "notes": data.notes if data.notes is not None else doc.get("notes"),
+            "edited_at": now_iso(), "edited_by": user.get("username"),
+        }
+        await db.sales.update_one({"id": sid}, {"$set": update})
+        await audit_log(user, "edit", "sale", sid,
+                        {"customer_id": doc.get("customer_id"), "total": doc.get("total"), "items": doc.get("items")},
+                        {"customer_id": new_customer_id, "total": new_total, "items": items_final})
+        return {"ok": True, "balance_after": balance_after, "number": doc.get("number")}
+
+    # --------- LEGACY QUICK EDIT PATH (discount/paid/notes only) ---------
     subtotal = doc.get("subtotal", 0)
     new_discount = data.discount if data.discount is not None else doc.get("discount", 0)
     new_paid = data.paid if data.paid is not None else doc.get("paid", 0)
@@ -901,12 +1026,10 @@ async def edit_sale(sid: str, data: SaleEditIn, user=Depends(require_perm("edit_
     old_remaining = doc.get("remaining", 0)
     diff = new_remaining - old_remaining
     if doc.get("customer_id") and diff != 0:
-        # Enforce credit limit
         customer = await db.customers.find_one({"id": doc["customer_id"]})
         if customer:
             limit = customer.get("credit_limit", 0)
-            new_bal = customer.get("balance", 0) + diff
-            if limit > 0 and new_bal > limit:
+            if limit > 0 and customer.get("balance", 0) + diff > limit:
                 raise HTTPException(status_code=400, detail="التعديل يتجاوز سقف حساب العميل")
         await _adjust_party_balance("customer", doc["customer_id"], diff, doc["number"], f"تعديل فاتورة {doc['number']}")
     update = {"discount": new_discount, "paid": new_paid, "total": new_total, "remaining": new_remaining,
@@ -1026,6 +1149,24 @@ class PurchaseEditIn(BaseModel):
     discount: Optional[float] = None
     paid: Optional[float] = None
     notes: Optional[str] = None
+    supplier_id: Optional[str] = None
+    supplier_name: Optional[str] = None
+    items: Optional[List[SaleItemIn]] = None
+
+
+async def _reverse_purchase_inventory(items: list, purchase_id: str):
+    for it in items or []:
+        cards = it.get("card_numbers") or []
+        if it.get("use_numbered") and cards:
+            # Delete cards that came from this purchase AND are still available
+            await db.cards.delete_many({"number": {"$in": cards}, "status": "available"})
+        else:
+            # decrement stock.total by qty (but never below current sold)
+            stock = await db.stock.find_one({"category_id": it.get("category_id")})
+            if stock:
+                new_total = max(stock.get("sold", 0), stock.get("total", 0) - int(it.get("quantity", 0)))
+                await db.stock.update_one({"category_id": it.get("category_id")}, {"$set": {"total": new_total}})
+
 
 @api.put("/purchases/{pid}")
 async def edit_purchase(pid: str, data: PurchaseEditIn, user=Depends(require_perm("edit_ops"))):
@@ -1033,6 +1174,83 @@ async def edit_purchase(pid: str, data: PurchaseEditIn, user=Depends(require_per
     if not doc: raise HTTPException(status_code=404, detail="غير موجود")
     if doc.get("status") != "active":
         raise HTTPException(status_code=400, detail="لا يمكن تعديل فاتورة ملغاة")
+
+    # --------- FULL EDIT PATH ---------
+    if data.items is not None:
+        new_supplier_id = data.supplier_id or doc.get("supplier_id")
+        # 1) reverse OLD inventory + supplier balance
+        await _reverse_purchase_inventory(doc.get("items") or [], pid)
+        if doc.get("supplier_id") and doc.get("remaining", 0):
+            await _adjust_party_balance(
+                "supplier", doc["supplier_id"], -float(doc.get("remaining") or 0),
+                doc["number"], f"عكس تأثير فاتورة المشتريات {doc['number']} للتعديل",
+            )
+        # 2) compute new totals + apply new inventory
+        subtotal = 0.0
+        items_final = []
+        for it in data.items:
+            line_total = it.quantity * it.price
+            subtotal += line_total
+            items_final.append({**it.model_dump(), "total": line_total})
+            cat = await db.card_categories.find_one({"id": it.category_id})
+            if not cat:
+                continue
+            if it.use_numbered and it.card_numbers:
+                for n in it.card_numbers:
+                    n = (n or "").strip()
+                    if not n: continue
+                    exists = await db.cards.find_one({"number": n})
+                    if exists: continue
+                    await db.cards.insert_one({
+                        "id": str(uuid.uuid4()), "number": n,
+                        "category_id": it.category_id, "category_name": cat.get("name"),
+                        "status": "available", "type": "numbered",
+                        "purchase_price": it.price,
+                        "supplier_id": new_supplier_id,
+                        "source_purchase_id": pid,
+                        "created_at": now_iso(), "created_by": user.get("username"),
+                    })
+            else:
+                stock = await db.stock.find_one({"category_id": it.category_id})
+                if stock:
+                    await db.stock.update_one({"category_id": it.category_id}, {"$inc": {"total": it.quantity}})
+                else:
+                    await db.stock.insert_one({
+                        "id": str(uuid.uuid4()), "category_id": it.category_id,
+                        "category_name": cat.get("name"),
+                        "total": it.quantity, "sold": 0, "used": 0, "created_at": now_iso(),
+                    })
+        new_discount = float(data.discount if data.discount is not None else doc.get("discount", 0) or 0)
+        new_paid = float(data.paid if data.paid is not None else doc.get("paid", 0) or 0)
+        new_total = subtotal - new_discount
+        new_remaining = new_total - new_paid
+        # 3) apply new supplier balance
+        balance_after = None
+        if new_supplier_id and new_remaining > 0:
+            balance_after = await _adjust_party_balance(
+                "supplier", new_supplier_id, new_remaining,
+                doc["number"], f"تعديل فاتورة مشتريات {doc['number']}",
+            )
+        # 4) update the doc
+        sup_name = data.supplier_name
+        if new_supplier_id and not sup_name:
+            _s = await db.suppliers.find_one({"id": new_supplier_id})
+            sup_name = (_s or {}).get("name", doc.get("supplier_name") or "")
+        update = {
+            "supplier_id": new_supplier_id, "supplier_name": sup_name or doc.get("supplier_name"),
+            "items": items_final,
+            "subtotal": subtotal, "discount": new_discount, "total": new_total,
+            "paid": new_paid, "remaining": new_remaining,
+            "notes": data.notes if data.notes is not None else doc.get("notes"),
+            "edited_at": now_iso(), "edited_by": user.get("username"),
+        }
+        await db.purchases.update_one({"id": pid}, {"$set": update})
+        await audit_log(user, "edit", "purchase", pid,
+                        {"supplier_id": doc.get("supplier_id"), "total": doc.get("total"), "items": doc.get("items")},
+                        {"supplier_id": new_supplier_id, "total": new_total, "items": items_final})
+        return {"ok": True, "balance_after": balance_after, "number": doc.get("number")}
+
+    # --------- LEGACY QUICK EDIT ---------
     subtotal = doc.get("subtotal", 0)
     new_discount = data.discount if data.discount is not None else doc.get("discount", 0)
     new_paid = data.paid if data.paid is not None else doc.get("paid", 0)
@@ -1178,30 +1396,34 @@ async def public_order(data: CardOrderRequest):
             "reason": "تجاوز السقف المسموح", "created_at": now_iso(),
         })
         raise HTTPException(status_code=400, detail="عذراً، لا يمكن تنفيذ الطلب تم تجاوز السقف المسموح الرجى سرعة سداد المبلغ الذي عليكم لتتمكن من الطلب مجدداً.")
-    # Reserve cards atomically (numbered first, then quantity)
+    # Reserve NUMBERED cards ONLY. This endpoint never falls back to quantity stock.
+    numbered_avail = await db.cards.count_documents({"category_id": data.category_id, "status": "available"})
+    if numbered_avail < data.quantity:
+        await db.card_order_attempts.insert_one({
+            "id": str(uuid.uuid4()), "customer_id": customer["id"], "customer_name": customer["name"],
+            "phone": customer["phone"], "category_id": data.category_id, "category_name": cat.get("name"),
+            "quantity": data.quantity, "total": total, "status": "rejected_no_stock",
+            "reason": "لا تتوفر كمية الكروت المطلوبة", "created_at": now_iso(),
+        })
+        raise HTTPException(status_code=400, detail="لا تتوفر كمية الكروت المطلوبة")
+
     cards_reserved = []
-    remaining_qty = data.quantity
-    numbered = await db.cards.find({"category_id": data.category_id, "status": "available"}).limit(remaining_qty).to_list(remaining_qty)
+    numbered = await db.cards.find({"category_id": data.category_id, "status": "available"}).limit(data.quantity).to_list(data.quantity)
     for c in numbered:
         r = await db.cards.update_one({"id": c["id"], "status": "available"}, {"$set": {"status": "sold", "sold_at": now_iso(), "sold_to": customer["id"]}})
         if r.modified_count == 1:
             cards_reserved.append(c["number"])
-            remaining_qty -= 1
-    if remaining_qty > 0:
-        stock = await db.stock.find_one({"category_id": data.category_id})
-        avail = (stock or {}).get("total", 0) - (stock or {}).get("sold", 0)
-        if avail < remaining_qty:
-            # Rollback numbered
-            if cards_reserved:
-                await db.cards.update_many({"number": {"$in": cards_reserved}}, {"$set": {"status": "available", "sold_at": None}})
-            await db.card_order_attempts.insert_one({
-                "id": str(uuid.uuid4()), "customer_id": customer["id"], "customer_name": customer["name"],
-                "phone": customer["phone"], "category_id": data.category_id, "category_name": cat.get("name"),
-                "quantity": data.quantity, "total": total, "status": "rejected_no_stock",
-                "reason": "عدم توفر الكمية المطلوبة", "created_at": now_iso(),
-            })
-            raise HTTPException(status_code=400, detail="الكرت غير متوفر بالكمية المطلوبة")
-        await db.stock.update_one({"category_id": data.category_id}, {"$inc": {"sold": remaining_qty}})
+    if len(cards_reserved) < data.quantity:
+        # Race condition — someone else consumed cards concurrently. Rollback and reject.
+        if cards_reserved:
+            await db.cards.update_many({"number": {"$in": cards_reserved}}, {"$set": {"status": "available", "sold_at": None, "sold_to": None}})
+        await db.card_order_attempts.insert_one({
+            "id": str(uuid.uuid4()), "customer_id": customer["id"], "customer_name": customer["name"],
+            "phone": customer["phone"], "category_id": data.category_id, "category_name": cat.get("name"),
+            "quantity": data.quantity, "total": total, "status": "rejected_no_stock",
+            "reason": "لا تتوفر كمية الكروت المطلوبة", "created_at": now_iso(),
+        })
+        raise HTTPException(status_code=400, detail="لا تتوفر كمية الكروت المطلوبة")
 
     number = await next_gwd_number()
     # Create sale invoice
@@ -1211,7 +1433,7 @@ async def public_order(data: CardOrderRequest):
         "sale_type": "credit", "source": "public_order",
         "items": [{"category_id": data.category_id, "category_name": cat.get("name"),
                    "quantity": data.quantity, "price": cat.get("sale_price", 0),
-                   "total": total, "card_numbers": cards_reserved, "use_numbered": bool(cards_reserved)}],
+                   "total": total, "card_numbers": cards_reserved, "use_numbered": True}],
         "subtotal": total, "discount": 0, "total": total, "paid": 0, "remaining": total,
         "notes": "طلب عبر رابط طلب الكرت", "status": "active", "created_at": now_iso(),
     }
@@ -1233,21 +1455,30 @@ async def public_order(data: CardOrderRequest):
         "customer_name": customer["name"], "phone": customer["phone"],
         "category_id": data.category_id, "category_name": cat.get("name"),
         "quantity": data.quantity, "total": total, "cards": cards_reserved,
-        "quantity_stock_taken": remaining_qty,
+        "quantity_stock_taken": 0,
         "status": "delivered", "created_at": now_iso(),
     }
     await db.orders.insert_one(order_doc)
     await notify(f"طلب كرت {number}", f"طلب كرت جديد من {customer['name']}", "success")
     return {
         "success": True, "cards": cards_reserved,
-        "quantity_from_stock": remaining_qty, "total": total,
+        "quantity_from_stock": 0, "total": total,
         "balance_after": balance_after, "message": "تم تنفيذ طلبك بنجاح",
     }
 
 @api.get("/public/card-order/categories")
 async def public_categories():
     items = await db.card_categories.find({"status": "active"}).to_list(500)
-    return [{"id": c["id"], "name": c["name"], "sale_price": c.get("sale_price", 0)} for c in items]
+    result = []
+    for c in items:
+        # Only expose count of NUMBERED available cards (customer portal is numbered-only).
+        numbered_avail = await db.cards.count_documents({"category_id": c["id"], "status": "available"})
+        result.append({
+            "id": c["id"], "name": c["name"],
+            "sale_price": c.get("sale_price", 0),
+            "available_numbered": numbered_avail,
+        })
+    return result
 
 @api.get("/orders")
 async def list_orders(user=Depends(require_perm("card_orders"))):

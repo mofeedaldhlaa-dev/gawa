@@ -6,25 +6,30 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { fmt, openWhatsApp, buildInvoiceMessage, genUUID, deviceId } from "@/lib/utils";
 import { Plus, Trash2, Save, MessageCircle } from "lucide-react";
 import { queueOperation, isOnline } from "@/lib/offline";
 
 export default function SaleForm() {
   const nav = useNavigate();
+  const { id: editId } = useParams();
+  const isEdit = !!editId;
+
   const [cats, setCats] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [customerId, setCustomerId] = useState("");
   const [saleType, setSaleType] = useState("");
-  const [items, setItems] = useState([{ category_id: "", quantity: 1, price: 0, use_numbered: false, card_numbers: [] }]);
+  const [items, setItems] = useState([{ category_id: "", quantity: 1, price: 0, use_numbered: false, card_numbers_text: "" }]);
   const [discount, setDiscount] = useState(0);
   const [paid, setPaid] = useState(0);
   const [notes, setNotes] = useState("");
   const [saved, setSaved] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [origNumber, setOrigNumber] = useState("");
   const [settings, setSettings] = useState({ company_name: "شبكة جواد نت اللاسلكية" });
 
   useEffect(() => {
@@ -33,16 +38,40 @@ export default function SaleForm() {
     api.get("/settings").then((r) => setSettings(r.data));
   }, []);
 
+  useEffect(() => {
+    if (!isEdit) return;
+    api.get(`/sales/${editId}`).then((r) => {
+      const s = r.data;
+      setOrigNumber(s.number || "");
+      setCustomerId(s.customer_id || "");
+      setSaleType(s.sale_type || "credit");
+      setDiscount(s.discount || 0);
+      setPaid(s.paid || 0);
+      setNotes(s.notes || "");
+      setItems((s.items || []).map((it) => ({
+        category_id: it.category_id, quantity: it.quantity, price: it.price,
+        use_numbered: !!it.use_numbered,
+        card_numbers_text: (it.card_numbers || []).join("\n"),
+      })));
+    }).catch((e) => { toast.error(errText(e)); nav("/sales"); });
+  }, [editId]);
+
   const updateItem = (i, key, val) => {
     const copy = [...items];
     copy[i] = { ...copy[i], [key]: val };
     if (key === "category_id") {
       const cat = cats.find((c) => c.id === val);
-      if (cat) copy[i].price = cat.sale_price;
+      const cust = customers.find((c) => c.id === customerId);
+      if (cat) {
+        const p = cust?.customer_type === "pos"
+          ? (cat.sale_price_pos ?? cat.sale_price)
+          : (cat.sale_price_customer ?? cat.sale_price);
+        copy[i].price = p || 0;
+      }
     }
     setItems(copy);
   };
-  const addItem = () => setItems([...items, { category_id: "", quantity: 1, price: 0, use_numbered: false, card_numbers: [] }]);
+  const addItem = () => setItems([...items, { category_id: "", quantity: 1, price: 0, use_numbered: false, card_numbers_text: "" }]);
   const removeItem = (i) => setItems(items.filter((_, x) => x !== i));
 
   const subtotal = items.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.price) || 0), 0);
@@ -50,35 +79,57 @@ export default function SaleForm() {
   const remaining = total - (Number(paid) || 0);
   const customer = customers.find((c) => c.id === customerId);
 
-  const submit = async () => {
-    if (!customerId) { toast.error("يرجى اختيار العميل قبل حفظ الفاتورة."); return; }
-    if (!saleType) { toast.error("يرجى اختيار نوع الفاتورة: نقد أو آجل."); return; }
-    if (items.some((i) => !i.category_id || !i.quantity)) { toast.error("أكمل بيانات الأصناف"); return; }
+  const payload = () => ({
+    customer_id: customerId || null,
+    customer_name: customer?.name || "",
+    sale_type: saleType,
+    items: items.map((i) => ({
+      category_id: i.category_id, quantity: Number(i.quantity), price: Number(i.price),
+      category_name: cats.find(c => c.id === i.category_id)?.name || "",
+      use_numbered: i.use_numbered,
+      card_numbers: i.use_numbered ? (i.card_numbers_text || "").split(/\s+/).filter(Boolean) : [],
+    })),
+    discount: Number(discount) || 0, paid: Number(paid) || 0, notes,
+  });
+
+  const validate = () => {
+    if (!customerId) { toast.error("يرجى اختيار العميل قبل حفظ الفاتورة."); return false; }
+    if (!saleType) { toast.error("يرجى اختيار نوع الفاتورة: نقد أو آجل."); return false; }
+    if (items.some((i) => !i.category_id || !i.quantity)) { toast.error("أكمل بيانات الأصناف"); return false; }
+    return true;
+  };
+
+  const submitCreate = async () => {
     setLoading(true);
     try {
-      const payload = {
-        customer_id: customerId || null,
-        customer_name: customer?.name || "",
-        sale_type: saleType,
-        items: items.map((i) => ({
-          category_id: i.category_id, quantity: Number(i.quantity), price: Number(i.price),
-          category_name: cats.find(c => c.id === i.category_id)?.name || "",
-          use_numbered: i.use_numbered,
-          card_numbers: i.use_numbered ? (i.card_numbers_text || "").split(/\s+/).filter(Boolean) : [],
-        })),
-        discount: Number(discount) || 0, paid: Number(paid) || 0, notes,
-        idempotency_key: genUUID(), device_id: deviceId(),
-      };
+      const body = { ...payload(), idempotency_key: genUUID(), device_id: deviceId() };
       if (!isOnline()) {
-        await queueOperation({ endpoint: "/sales", payload });
+        await queueOperation({ endpoint: "/sales", payload: body });
         toast.success("تم حفظ الفاتورة محلياً - ستتم المزامنة عند الاتصال");
         nav("/sales"); return;
       }
-      const r = await api.post("/sales", payload);
+      const r = await api.post("/sales", body);
       setSaved(r.data);
       toast.success(`تم حفظ الفاتورة ${r.data.number}`);
     } catch (e) { toast.error(errText(e)); }
     setLoading(false);
+  };
+
+  const submitEdit = async () => {
+    setConfirmOpen(false);
+    setLoading(true);
+    try {
+      await api.put(`/sales/${editId}`, payload());
+      toast.success(`تم تعديل الفاتورة ${origNumber}`);
+      nav("/sales");
+    } catch (e) { toast.error(errText(e)); }
+    setLoading(false);
+  };
+
+  const submit = () => {
+    if (!validate()) return;
+    if (isEdit) setConfirmOpen(true);
+    else submitCreate();
   };
 
   const sendWhatsApp = () => {
@@ -96,6 +147,11 @@ export default function SaleForm() {
   return (
     <div className="space-y-4 max-w-4xl" data-testid="sale-form">
       <Card className="p-4 md:p-6 space-y-4">
+        {isEdit && (
+          <div className="bg-amber-50 border border-amber-200 rounded p-3 text-sm">
+            وضع التعديل — الفاتورة رقم <span className="font-mono font-bold text-[#452480]" data-testid="sale-edit-number">{origNumber}</span>
+          </div>
+        )}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
             <Label>العميل *</Label>
@@ -149,11 +205,27 @@ export default function SaleForm() {
         </div>
         <Textarea placeholder="ملاحظات" value={notes} onChange={(e) => setNotes(e.target.value)} />
         <div className="flex gap-2 flex-wrap">
-          <Button onClick={submit} disabled={loading} className="bg-[#221340] w-full sm:w-auto" data-testid="sale-save"><Save size={16} className="ml-1"/> {loading ? "جاري..." : "حفظ الفاتورة"}</Button>
+          <Button onClick={submit} disabled={loading} className="bg-[#221340] w-full sm:w-auto" data-testid="sale-save"><Save size={16} className="ml-1"/> {loading ? "جاري..." : (isEdit ? "حفظ التعديل" : "حفظ الفاتورة")}</Button>
           {saved && <Button onClick={sendWhatsApp} variant="outline" className="border-green-600 text-green-700 w-full sm:w-auto" data-testid="sale-wa"><MessageCircle size={16} className="ml-1"/> إرسال واتساب</Button>}
         </div>
         {saved && <div className="p-3 bg-green-50 border border-green-200 rounded" data-testid="sale-success">تم إنشاء الفاتورة <span className="font-mono font-bold">{saved.number}</span></div>}
       </Card>
+
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>تأكيد حفظ تعديلات الفاتورة {origNumber}</AlertDialogTitle>
+            <AlertDialogDescription>
+              سيؤدي حفظ التعديل إلى تحديث المخزون ورصيد الحساب والمديونية وإجمالي المبيعات
+              والأرباح والتقارير المرتبطة بالفاتورة. لا يتراجع النظام تلقائياً بعد الحفظ.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="sale-edit-cancel">إلغاء</AlertDialogCancel>
+            <AlertDialogAction onClick={submitEdit} className="bg-[#221340]" data-testid="sale-edit-confirm">تأكيد وحفظ</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

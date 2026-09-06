@@ -5,6 +5,13 @@ Owner: mofeedaldhlaa@gmail.com • 784225716 • المخاء
 ## Stack
 FastAPI + MongoDB + React (RTL) + JWT + IndexedDB + wa.me
 
+## Delivered v1.8 (2026-02-05) — Public order = numbered cards only
+- `POST /api/public/card-order/request` no longer falls back to quantity stock. It counts available numbered cards for the requested category; if `numbered_avail < quantity` it rejects with exact message **"لا تتوفر كمية الكروت المطلوبة"** and logs a `rejected_no_stock` attempt.
+- `GET /api/public/card-order/categories` now returns `available_numbered` per category so the UI can prevent the user before submitting.
+- Order/sale docs written by the public flow now always store `use_numbered: true` and `quantity_stock_taken: 0`.
+- `PublicOrder.jsx` shows the per-category numbered count in the dropdown, an inline availability line under the category field, a red inline warning + disabled submit button when `quantity > available_numbered`, and no longer renders the "من المخزون" hint after success.
+- Same-page error remains inline (no redirect on 400/401/403/404/429).
+
 ## Delivered v1.7 (2026-02-05) — Full mobile-responsive overhaul
 - Global CSS (`index.css`): `html, body` locked at `max-width:100vw` with `overflow-x:hidden`; `main` gets `min-width:0` so wide tables scroll INSIDE their card container instead of pushing the page; inputs forced to `font-size:16px` on <640px to prevent iOS zoom; ≥44px touch targets on coarse pointers; sonner toaster capped inside viewport.
 - Viewport meta (`public/index.html`): removed `maximum-scale=1` (accessibility) and added `viewport-fit=cover`.
