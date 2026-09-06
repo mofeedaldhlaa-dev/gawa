@@ -1588,14 +1588,27 @@ async def dashboard_stats(user=Depends(get_current_user)):
     cards_sold = await db.cards.count_documents({"status": "sold"})
     cards_used = await db.cards.count_documents({"status": "used"})
     users_count = await db.users.count_documents({})
-    # inventory value
+    # inventory value + low-stock alerts (reuse same loop, zero extra queries)
     cats = await db.card_categories.find().to_list(500)
     inventory_value = 0
+    low_stock_alerts = []
     for c in cats:
         avail = await db.cards.count_documents({"category_id": c["id"], "status": "available"})
         stock = await db.stock.find_one({"category_id": c["id"]})
         qty_avail = (stock or {}).get("total", 0) - (stock or {}).get("sold", 0) if stock else 0
-        inventory_value += (avail + qty_avail) * c.get("purchase_price", 0)
+        available_total = avail + max(0, qty_avail)
+        inventory_value += available_total * c.get("purchase_price", 0)
+        threshold = c.get("low_stock_threshold", 20) or 0
+        if threshold > 0 and available_total <= threshold:
+            low_stock_alerts.append({
+                "category_id": c["id"],
+                "category_name": c.get("name", ""),
+                "available_total": available_total,
+                "numbered_available": avail,
+                "quantity_available": max(0, qty_avail),
+                "threshold": threshold,
+            })
+    low_stock_alerts.sort(key=lambda x: x["available_total"])
     # recent
     recent_sales = await db.sales.find().sort("created_at", -1).limit(5).to_list(5)
     recent_receipts = await db.receipts.find().sort("created_at", -1).limit(5).to_list(5)
@@ -1616,6 +1629,7 @@ async def dashboard_stats(user=Depends(get_current_user)):
         "cards_available": cards_available,
         "cards_sold": cards_sold,
         "cards_used": cards_used,
+        "low_stock_alerts": low_stock_alerts,
         "customers_count": len(customers),
         "suppliers_count": len(suppliers),
         "users_count": users_count,

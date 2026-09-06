@@ -5,6 +5,12 @@ Owner: mofeedaldhlaa@gmail.com • 784225716 • المخاء
 ## Stack
 FastAPI + MongoDB + React (RTL) + JWT + IndexedDB + wa.me
 
+## Delivered v2.3 (2026-02-06) — Low-stock alerts on dashboard
+- **`GET /api/reports/dashboard`** now includes a `low_stock_alerts` array computed **inside the existing inventory-value loop** (zero extra DB queries). Each entry: `category_id`, `category_name`, `available_total`, `numbered_available`, `quantity_available`, `threshold`. Only categories where `available_total <= threshold` are returned (threshold=0 disables the alert).
+- **`Dashboard.jsx`** shows a bold amber "تنبيهات المخزون" card at the top with a badge count. Each alert is a `<Link>` to `/stock?category=<id>`. Available count is red when 0, amber otherwise. Card is hidden entirely when the list is empty. Data-testids: `low-stock-alerts`, `low-stock-<id>`.
+- The threshold field is `low_stock_threshold` on each category (already editable in `/categories`).
+- **Cost:** 0 extra queries per dashboard load; frontend reuses the existing dashboard call.
+
 ## Delivered v2.2 (2026-02-06) — Duplicate customer phone guard
 - Added a single lightweight `find_one({"phone": ..., "_id": 1})` check to all three customer-creation paths:
   - `POST /api/customers` (admin add) — reject with **«رقم الهاتف مرتبط بحساب عميل آخر.»**

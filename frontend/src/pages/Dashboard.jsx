@@ -3,7 +3,7 @@ import api from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { fmt, fmtDate } from "@/lib/utils";
 import { Link } from "react-router-dom";
-import { ShoppingCart, Package, Users, Truck, Boxes, CreditCard, Receipt, FileBarChart, Ticket, PlusCircle } from "lucide-react";
+import { ShoppingCart, Package, Users, Truck, Boxes, CreditCard, Receipt, FileBarChart, Ticket, PlusCircle, AlertTriangle } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 
 const Stat = ({ label, value, sub, tone = "purple", testid }) => {
@@ -56,6 +56,35 @@ export default function Dashboard() {
           <Quick to="/reports" label="التقارير" icon={FileBarChart} testid="quick-reports" />
         </div>
       </div>
+
+      {d.low_stock_alerts?.length > 0 && (
+        <Card className="p-4 border-2 border-amber-300 bg-amber-50" data-testid="low-stock-alerts">
+          <div className="flex items-center gap-2 mb-3">
+            <AlertTriangle className="text-amber-600" size={20} />
+            <div className="font-bold text-amber-900">تنبيهات المخزون</div>
+            <span className="bg-amber-600 text-white text-xs px-2 py-0.5 rounded-full num">{d.low_stock_alerts.length}</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            {d.low_stock_alerts.map((a) => (
+              <Link
+                to={`/stock?category=${a.category_id}`}
+                key={a.category_id}
+                data-testid={`low-stock-${a.category_id}`}
+                className="flex items-center justify-between gap-2 p-3 bg-white border border-amber-200 rounded-lg hover:border-amber-500 hover:shadow transition"
+              >
+                <div className="min-w-0">
+                  <div className="font-bold text-[#221340] truncate">{a.category_name}</div>
+                  <div className="text-xs text-slate-500">حد التنبيه: <span className="num">{a.threshold}</span></div>
+                </div>
+                <div className="text-left shrink-0">
+                  <div className="text-xs text-slate-500">المتبقي</div>
+                  <div className={`num font-black text-lg ${a.available_total === 0 ? "text-red-600" : "text-amber-700"}`}>{a.available_total}</div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {d.chart?.length > 0 && (
         <Card className="p-4">
