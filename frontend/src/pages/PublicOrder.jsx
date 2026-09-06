@@ -7,10 +7,17 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { fmt, openWhatsApp } from "@/lib/utils";
-import { Wifi, CheckCircle, Copy, KeyRound, Phone, Ban, AlertCircle } from "lucide-react";
+import { fmt, fmtDate, openWhatsApp } from "@/lib/utils";
+import { printPublicOrder } from "@/lib/print";
+import { Wifi, CheckCircle, Copy, KeyRound, Phone, Ban, AlertCircle, Printer, History, Search } from "lucide-react";
 
 const ADMIN_WHATSAPP = "784225716";
+
+const priceForCustomer = (cat, ctype) => {
+  if (!cat) return 0;
+  const p = ctype === "pos" ? cat.sale_price_pos : cat.sale_price_customer;
+  return (p ?? cat.sale_price) || 0;
+};
 
 export default function PublicOrder() {
   const [phone, setPhone] = useState("");
@@ -27,6 +34,12 @@ export default function PublicOrder() {
   const [blocked, setBlocked] = useState(false);
   const [selectedCat, setSelectedCat] = useState(null);
   const [loginError, setLoginError] = useState("");
+  // Previous orders section
+  const [showHistory, setShowHistory] = useState(false);
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [history, setHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   const login = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
@@ -40,7 +53,6 @@ export default function PublicOrder() {
       setCats(cr.data);
       toast.success(`مرحباً ${r.data.name}`);
     } catch (err) {
-      // NEVER navigate/redirect on failure. Show error inline in the same page.
       const status = err.response?.status;
       const msg = errText(err);
       if (status === 429) { setBlocked(true); setLoginError(msg); }
@@ -65,11 +77,23 @@ export default function PublicOrder() {
     setLoading(false);
   };
 
-  const copyCard = async (n) => {
+  const loadHistory = async () => {
+    setHistoryLoading(true);
     try {
-      await navigator.clipboard.writeText(n);
-      toast.success("تم نسخ رقم الكرت بنجاح");
-    } catch { toast.error("تعذر النسخ"); }
+      const r = await api.post("/public/card-order/my-orders", { phone, password, start: startDate || null, end: endDate || null });
+      setHistory(r.data || []);
+      if (!(r.data || []).length) toast.info("لا توجد طلبات في الفترة المحددة");
+    } catch (e) { toast.error(errText(e)); }
+    setHistoryLoading(false);
+  };
+
+  const doPrint = (order) => {
+    printPublicOrder({ order, customer });
+  };
+
+  const copyCard = async (n) => {
+    try { await navigator.clipboard.writeText(n); toast.success("تم نسخ رقم الكرت بنجاح"); }
+    catch { toast.error("تعذر النسخ"); }
   };
 
   const contactSupport = () => {
@@ -90,6 +114,14 @@ export default function PublicOrder() {
     );
   }
 
+  const currentCat = cats.find((x) => x.id === category_id);
+  const ctype = customer?.customer_type || "customer";
+  const currentPrice = priceForCustomer(currentCat, ctype);
+  const availNumbered = currentCat?.available_numbered ?? 0;
+  const wantQty = Number(quantity) || 0;
+  const insufficient = category_id && wantQty > 0 && wantQty > availNumbered;
+  const totalPreview = currentPrice * wantQty;
+
   return (
     <div className="min-h-screen brand-gradient flex items-center justify-center p-4" data-testid="public-order">
       <Card className="w-full max-w-md p-6 bg-white">
@@ -104,8 +136,7 @@ export default function PublicOrder() {
             <div><Label>كلمة المرور</Label><Input type="password" value={password} onChange={(e) => { setPassword(e.target.value); setLoginError(""); }} data-testid="po-password" autoComplete="current-password"/></div>
             {loginError && (
               <div className="flex items-start gap-2 rounded-md border border-red-300 bg-red-50 text-red-700 px-3 py-2 text-sm" data-testid="po-login-error" role="alert">
-                <AlertCircle size={16} className="mt-0.5 shrink-0"/>
-                <span>{loginError}</span>
+                <AlertCircle size={16} className="mt-0.5 shrink-0"/><span>{loginError}</span>
               </div>
             )}
             <Button type="submit" disabled={loading} className="w-full bg-[#221340]" data-testid="po-login">{loading?"جاري...":"دخول"}</Button>
@@ -123,7 +154,7 @@ export default function PublicOrder() {
               <div className="flex justify-between items-start">
                 <div>
                   <div className="font-bold">{customer.name}</div>
-                  <div className="text-xs text-slate-500">{customer.customer_type === "pos" ? "نقطة بيع" : "عميل"}</div>
+                  <div className="text-xs text-slate-500">{ctype === "pos" ? "نقطة بيع" : "عميل"}</div>
                 </div>
                 <button onClick={() => setShowChangePwd(true)} className="text-xs text-[#452480] hover:underline flex items-center gap-1" data-testid="po-change-pwd"><KeyRound size={12}/> تغيير كلمة المرور</button>
               </div>
@@ -136,31 +167,79 @@ export default function PublicOrder() {
             <div><Label>الفئة</Label>
               <Select value={category_id} onValueChange={setCategoryId}>
                 <SelectTrigger data-testid="po-cat"><SelectValue placeholder="اختر"/></SelectTrigger>
-                <SelectContent>{cats.map((c) => <SelectItem key={c.id} value={c.id}>{c.name} - {fmt(c.sale_price)} • متوفر {c.available_numbered ?? 0}</SelectItem>)}</SelectContent>
+                <SelectContent>
+                  {cats.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name} - {fmt(priceForCustomer(c, ctype))}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
               </Select>
-              {category_id && (() => {
-                const c = cats.find((x) => x.id === category_id);
-                const avail = c?.available_numbered ?? 0;
-                return (
-                  <div className={`text-xs mt-1 ${avail > 0 ? "text-slate-500" : "text-red-600"}`} data-testid="po-cat-availability">
-                    الكروت المرقمة المتوفرة: <span className="num font-bold">{avail}</span>
-                  </div>
-                );
-              })()}
             </div>
             <div><Label>الكمية</Label><Input type="number" min="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} data-testid="po-qty"/></div>
-            {(() => {
-              const c = cats.find((x) => x.id === category_id);
-              const avail = c?.available_numbered ?? 0;
-              const insufficient = category_id && Number(quantity) > 0 && Number(quantity) > avail;
-              return insufficient ? (
-                <div className="flex items-start gap-2 rounded-md border border-red-300 bg-red-50 text-red-700 px-3 py-2 text-sm" data-testid="po-no-stock" role="alert">
-                  <AlertCircle size={16} className="mt-0.5 shrink-0"/>
-                  <span>لا تتوفر كمية الكروت المطلوبة</span>
+            {category_id && (
+              <Card className="p-3 bg-amber-50 border-amber-200 text-sm space-y-1" data-testid="po-price-preview">
+                <div className="flex justify-between"><span className="text-slate-600">السعر ({ctype === "pos" ? "نقطة بيع" : "عميل"})</span><span className="num font-bold gold-text">{fmt(currentPrice)}</span></div>
+                <div className="flex justify-between"><span className="text-slate-600">الإجمالي</span><span className="num font-bold text-lg">{fmt(totalPreview)}</span></div>
+              </Card>
+            )}
+            {insufficient && (
+              <div className="flex items-start gap-2 rounded-md border border-red-300 bg-red-50 text-red-700 px-3 py-2 text-sm" data-testid="po-no-stock" role="alert">
+                <AlertCircle size={16} className="mt-0.5 shrink-0"/><span>لا تتوفر كمية الكروت المطلوبة</span>
+              </div>
+            )}
+            <Button onClick={request} disabled={loading || !category_id || wantQty < 1 || insufficient} className="w-full bg-[#D4AF37] text-[#1A0F33] font-bold hover:bg-[#C5A028] text-lg py-6 disabled:opacity-50" data-testid="po-request">طلب</Button>
+
+            {/* Previous orders section */}
+            <div className="pt-3 border-t">
+              <button type="button" onClick={() => setShowHistory((v) => !v)} className="w-full flex items-center justify-between text-sm font-bold text-[#221340]" data-testid="po-history-toggle">
+                <span className="flex items-center gap-2"><History size={16}/> الطلبات السابقة</span>
+                <span className="text-[#452480]">{showHistory ? "إخفاء" : "عرض"}</span>
+              </button>
+              {showHistory && (
+                <div className="mt-3 space-y-3" data-testid="po-history">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div><Label className="text-xs">من تاريخ</Label><Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} data-testid="po-history-start"/></div>
+                    <div><Label className="text-xs">إلى تاريخ</Label><Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} data-testid="po-history-end"/></div>
+                  </div>
+                  <Button onClick={loadHistory} disabled={historyLoading} variant="outline" className="w-full" data-testid="po-history-search"><Search size={14} className="ml-1"/> {historyLoading ? "جاري..." : "بحث"}</Button>
+
+                  <div className="space-y-2">
+                    {history.map((o) => (
+                      <Card key={o.id} className="p-3 text-sm border-slate-200" data-testid={`po-order-${o.id}`}>
+                        <div className="flex justify-between items-start gap-2">
+                          <div className="min-w-0">
+                            <div className="font-mono font-bold text-[#452480]" data-testid={`po-order-number-${o.id}`}>{o.number}</div>
+                            <div className="text-xs text-slate-500">{fmtDate(o.created_at)}</div>
+                          </div>
+                          <Button size="sm" variant="outline" onClick={() => doPrint(o)} className="shrink-0" data-testid={`po-order-print-${o.id}`}><Printer size={12} className="ml-1"/> طباعة</Button>
+                        </div>
+                        <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                          <div><div className="text-slate-500">الحساب</div><div className="font-bold truncate">{o.customer_name}</div></div>
+                          <div><div className="text-slate-500">الفئة</div><div className="font-bold truncate">{o.category_name || "-"}</div></div>
+                          <div><div className="text-slate-500">الكمية</div><div className="num font-bold">{o.quantity}</div></div>
+                          <div><div className="text-slate-500">الإجمالي</div><div className="num font-bold">{fmt(o.total)}</div></div>
+                        </div>
+                        {o.cards?.length > 0 && (
+                          <div className="mt-2 pt-2 border-t">
+                            <div className="text-slate-500 text-xs mb-1">الكروت:</div>
+                            <div className="space-y-1">
+                              {o.cards.map((c) => (
+                                <div key={c} className="flex items-center justify-between bg-slate-50 p-1.5 rounded text-xs">
+                                  <span className="font-mono tracking-wider">{c}</span>
+                                  <Button size="sm" variant="outline" onClick={() => copyCard(c)} className="h-6 px-2 text-xs"><Copy size={10}/> نسخ</Button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </Card>
+                    ))}
+                    {history.length === 0 && !historyLoading && <div className="text-center text-xs text-slate-400 py-4">لا توجد طلبات لعرضها. اختر فترة واضغط بحث.</div>}
+                  </div>
                 </div>
-              ) : null;
-            })()}
-            <Button onClick={request} disabled={loading || (() => { const c = cats.find((x) => x.id === category_id); const avail = c?.available_numbered ?? 0; return !category_id || Number(quantity) < 1 || Number(quantity) > avail; })()} className="w-full bg-[#D4AF37] text-[#1A0F33] font-bold hover:bg-[#C5A028] text-lg py-6 disabled:opacity-50" data-testid="po-request">طلب</Button>
+              )}
+            </div>
           </div>
         )}
 
@@ -241,11 +320,11 @@ function RegisterForm({ onClose }) {
     e.preventDefault();
     setLoading(true);
     try {
-      await api.post("/public/customer/register-request", f);
+      await api.post("/public/customer/register", f);
       const now = new Date();
-      const msg = `طلب إنشاء حساب جديد\n\nالاسم الرباعي: ${f.full_name}\nرقم الهاتف: ${f.phone}\nالعنوان: ${f.address || "-"}\n\nأرجو من الإدارة إنشاء حساب لي في شبكة جواد نت.\n\n${now.toLocaleString("en-GB")}`;
+      const msg = `طلب إنشاء حساب جديد\n\nاسم العميل: ${f.full_name}\nرقم الهاتف: ${f.phone}\nالعنوان: ${f.address || "-"}\n\nيرجى الموافقة على الطلب.\n\n${now.toLocaleString("en-GB")}`;
       openWhatsApp(ADMIN_WHATSAPP, msg);
-      toast.success("تم إرسال الطلب");
+      toast.success("تم إرسال الطلب، سيتم التواصل معك قريباً");
       onClose();
     } catch (e) { toast.error(errText(e)); }
     setLoading(false);
@@ -254,29 +333,29 @@ function RegisterForm({ onClose }) {
     <DialogContent>
       <DialogHeader><DialogTitle>إنشاء حساب جديد</DialogTitle></DialogHeader>
       <form onSubmit={submit} className="space-y-3">
-        <div><Label>الاسم الرباعي</Label><Input value={f.full_name} onChange={(e) => setF({...f, full_name: e.target.value})} required data-testid="reg-name"/></div>
-        <div><Label>رقم الهاتف</Label><Input value={f.phone} onChange={(e) => setF({...f, phone: e.target.value})} required data-testid="reg-phone"/></div>
-        <div><Label>العنوان (عنوان العمل أو اسم محلك)</Label><Input value={f.address} onChange={(e) => setF({...f, address: e.target.value})} data-testid="reg-address" placeholder="عنوان العمل أو اسم المحل"/></div>
-        <Button type="submit" disabled={loading} className="w-full bg-[#D4AF37] text-[#1A0F33] font-bold" data-testid="reg-submit">{loading?"جاري...":"إرسال الطلب للإدارة"}</Button>
+        <div><Label>الاسم الكامل</Label><Input value={f.full_name} onChange={(e) => setF({ ...f, full_name: e.target.value })} required data-testid="reg-name"/></div>
+        <div><Label>رقم الهاتف</Label><Input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} required data-testid="reg-phone"/></div>
+        <div><Label>العنوان</Label><Input value={f.address} onChange={(e) => setF({ ...f, address: e.target.value })} data-testid="reg-address"/></div>
+        <Button type="submit" disabled={loading} className="w-full bg-[#221340]" data-testid="reg-submit">{loading?"جاري...":"تسجيل"}</Button>
       </form>
     </DialogContent>
   );
 }
 
 function ChangePasswordForm({ phone, currentPassword, onClose, onDone }) {
-  const [cur, setCur] = useState(currentPassword || "");
-  const [np, setNp] = useState("");
-  const [cf, setCf] = useState("");
+  const [current, setCurrent] = useState(currentPassword || "");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
   const [loading, setLoading] = useState(false);
   const submit = async (e) => {
     e.preventDefault();
-    if (np !== cf) { toast.error("كلمة المرور الجديدة والتأكيد غير متطابقين"); return; }
-    if (np.length < 4) { toast.error("كلمة المرور قصيرة جداً"); return; }
+    if (next !== confirm) { toast.error("كلمة المرور وتأكيدها غير متطابقين"); return; }
+    if ((next || "").length < 4) { toast.error("كلمة المرور قصيرة"); return; }
     setLoading(true);
     try {
-      await api.post("/public/customer/change-password", { phone, current_password: cur, new_password: np });
+      await api.post("/public/customer/change-password", { phone, current_password: current, new_password: next });
       toast.success("تم تغيير كلمة المرور");
-      onDone && onDone(np);
+      onDone && onDone(next);
       onClose();
     } catch (e) { toast.error(errText(e)); }
     setLoading(false);
@@ -285,9 +364,9 @@ function ChangePasswordForm({ phone, currentPassword, onClose, onDone }) {
     <DialogContent>
       <DialogHeader><DialogTitle>تغيير كلمة المرور</DialogTitle></DialogHeader>
       <form onSubmit={submit} className="space-y-3">
-        <div><Label>كلمة المرور الحالية</Label><Input type="password" value={cur} onChange={(e) => setCur(e.target.value)} required data-testid="cp-cur"/></div>
-        <div><Label>كلمة المرور الجديدة</Label><Input type="password" value={np} onChange={(e) => setNp(e.target.value)} required data-testid="cp-new"/></div>
-        <div><Label>تأكيد كلمة المرور</Label><Input type="password" value={cf} onChange={(e) => setCf(e.target.value)} required data-testid="cp-confirm"/></div>
+        <div><Label>كلمة المرور الحالية</Label><Input type="password" value={current} onChange={(e) => setCurrent(e.target.value)} required data-testid="cp-current"/></div>
+        <div><Label>كلمة المرور الجديدة</Label><Input type="password" value={next} onChange={(e) => setNext(e.target.value)} required data-testid="cp-new"/></div>
+        <div><Label>تأكيد كلمة المرور</Label><Input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required data-testid="cp-confirm"/></div>
         <Button type="submit" disabled={loading} className="w-full bg-[#221340]" data-testid="cp-submit">{loading?"جاري...":"حفظ"}</Button>
       </form>
     </DialogContent>

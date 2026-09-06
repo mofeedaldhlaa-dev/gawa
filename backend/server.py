@@ -265,6 +265,12 @@ class CardOrderRequest(BaseModel):
     category_id: str
     quantity: int = 1
 
+class CardOrderHistoryIn(BaseModel):
+    phone: str
+    password: str
+    start: Optional[str] = None  # YYYY-MM-DD
+    end: Optional[str] = None    # YYYY-MM-DD
+
 class SettingsIn(BaseModel):
     low_stock_default: Optional[int] = None
     currency: Optional[str] = None
@@ -1385,7 +1391,12 @@ async def public_order(data: CardOrderRequest):
         raise HTTPException(status_code=401, detail="كلمة السر غير صحيحة")
     cat = await db.card_categories.find_one({"id": data.category_id})
     if not cat: raise HTTPException(status_code=404, detail="الفئة غير موجودة")
-    total = cat.get("sale_price", 0) * data.quantity
+    # Pick price according to customer type (POS vs regular customer)
+    ctype = customer.get("customer_type", "customer")
+    unit_price = cat.get("sale_price_pos") if ctype == "pos" else cat.get("sale_price_customer")
+    if unit_price is None:
+        unit_price = cat.get("sale_price", 0)
+    total = unit_price * data.quantity
     limit = customer.get("credit_limit", 0)
     balance = customer.get("balance", 0)
     if limit > 0 and balance + total > limit:
@@ -1432,7 +1443,7 @@ async def public_order(data: CardOrderRequest):
         "customer_id": customer["id"], "customer_name": customer["name"],
         "sale_type": "credit", "source": "public_order",
         "items": [{"category_id": data.category_id, "category_name": cat.get("name"),
-                   "quantity": data.quantity, "price": cat.get("sale_price", 0),
+                   "quantity": data.quantity, "price": unit_price,
                    "total": total, "card_numbers": cards_reserved, "use_numbered": True}],
         "subtotal": total, "discount": 0, "total": total, "paid": 0, "remaining": total,
         "notes": "طلب عبر رابط طلب الكرت", "status": "active", "created_at": now_iso(),
@@ -1471,14 +1482,39 @@ async def public_categories():
     items = await db.card_categories.find({"status": "active"}).to_list(500)
     result = []
     for c in items:
-        # Only expose count of NUMBERED available cards (customer portal is numbered-only).
         numbered_avail = await db.cards.count_documents({"category_id": c["id"], "status": "available"})
         result.append({
             "id": c["id"], "name": c["name"],
             "sale_price": c.get("sale_price", 0),
+            "sale_price_customer": c.get("sale_price_customer", c.get("sale_price", 0)),
+            "sale_price_pos": c.get("sale_price_pos", c.get("sale_price", 0)),
             "available_numbered": numbered_avail,
         })
     return result
+
+
+@api.post("/public/card-order/my-orders")
+async def public_my_orders(data: CardOrderHistoryIn):
+    """Return the authenticated customer's past card orders, optionally within a date range.
+    Auth is done via phone+password (same credentials used to place orders)."""
+    customer = await db.customers.find_one({"phone": data.phone})
+    if not customer:
+        raise HTTPException(status_code=404, detail="لاتمتلك حساب بهذا الرقم")
+    if customer.get("password") != data.password:
+        raise HTTPException(status_code=401, detail="كلمة السر غير صحيحة")
+    if customer.get("status") == "disabled":
+        raise HTTPException(status_code=403, detail="الحساب معطل")
+
+    query: Dict[str, Any] = {"customer_id": customer["id"]}
+    if data.start or data.end:
+        rng: Dict[str, Any] = {}
+        if data.start:
+            rng["$gte"] = f"{data.start}T00:00:00+00:00"
+        if data.end:
+            rng["$lte"] = f"{data.end}T23:59:59+00:00"
+        query["created_at"] = rng
+    docs = await db.orders.find(query).sort("created_at", -1).limit(500).to_list(500)
+    return [clean_doc(o) for o in docs]
 
 @api.get("/orders")
 async def list_orders(user=Depends(require_perm("card_orders"))):

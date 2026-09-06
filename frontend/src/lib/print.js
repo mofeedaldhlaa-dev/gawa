@@ -260,6 +260,42 @@ export const printStatement = ({ customer, entries, username }) => {
   openPrintWindow(html);
 };
 
+export const printPublicOrder = ({ order, customer, company = "شبكة جواد نت اللاسلكية" }) => {
+  const cards = (order.cards || []).join(", ");
+  const html = `
+    <div class="title">فاتورة طلب كرت — ${order.number}</div>
+    <div class="info-grid">
+      <div class="info-row"><span class="lbl">التاريخ</span><span class="val">${fmtDate(order.created_at)}</span></div>
+      <div class="info-row"><span class="lbl">اسم الحساب</span><span class="val">${order.customer_name || customer?.name || "-"}</span></div>
+      <div class="info-row"><span class="lbl">رقم الهاتف</span><span class="val">${order.phone || customer?.phone || "-"}</span></div>
+      <div class="info-row"><span class="lbl">نوع الحساب</span><span class="val">${(customer?.customer_type || "customer") === "pos" ? "نقطة بيع" : "عميل"}</span></div>
+    </div>
+    <table>
+      <thead><tr>
+        <th style="width:8mm">م</th>
+        <th>الفئة</th>
+        <th style="width:20mm">الكمية</th>
+        <th style="width:28mm">سعر الوحدة</th>
+        <th style="width:32mm">الإجمالي</th>
+      </tr></thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>${order.category_name || "-"}${cards ? `<div style="font-family:monospace;font-size:10px;color:#666;margin-top:1mm">${cards}</div>` : ""}</td>
+          <td class="num">${order.quantity || 0}</td>
+          <td class="num">${fmt(order.total && order.quantity ? order.total / order.quantity : 0)}</td>
+          <td class="num">${fmt(order.total)}</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="totals">
+      <div class="row grand"><span>الإجمالي</span><span class="num">${fmt(order.total)}</span></div>
+    </div>
+    ${buildFooter(company)}
+  `;
+  openPrintWindow(html);
+};
+
 export const printReport = ({ title, headers, rows, totals, username }) => {
   const headerCells = headers.map((h) => `<th>${h}</th>`).join("");
   const dataRows = (rows || []).map((r) => `<tr>${r.map((c) => `<td>${c ?? "-"}</td>`).join("")}</tr>`).join("");

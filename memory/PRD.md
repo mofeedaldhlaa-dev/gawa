@@ -5,6 +5,13 @@ Owner: mofeedaldhlaa@gmail.com • 784225716 • المخاء
 ## Stack
 FastAPI + MongoDB + React (RTL) + JWT + IndexedDB + wa.me
 
+## Delivered v1.9 (2026-02-06) — Public order pricing + history
+- **Hide numbered-availability count from customer** while keeping the internal validation intact. The category dropdown now shows only `name - price` (no `متوفر X`), the standalone availability hint was removed, and the client still disables the request button when `quantity > available_numbered` and shows the exact red text «لا تتوفر كمية الكروت المطلوبة». Backend keeps returning `available_numbered` (used only for internal checks).
+- **Per-customer-type pricing:** `POST /api/public/card-order/request` now picks `sale_price_pos` for POS-type customers and `sale_price_customer` otherwise (falls back to `sale_price` if not defined). `/api/public/card-order/categories` exposes both `sale_price_customer` and `sale_price_pos`. UI shows a live "السعر (نقطة بيع|عميل)" + "الإجمالي" preview before submit (`data-testid=po-price-preview`).
+- **Previous orders section** inside `/order`: toggle (`po-history-toggle`), date-range inputs (`po-history-start`, `po-history-end`), search button (`po-history-search`). New endpoint `POST /api/public/card-order/my-orders` (auth via phone+password + optional `start`/`end` YYYY-MM-DD) returns the caller's orders sorted DESC.
+- **Print per order:** every past-order card has its own `printPublicOrder(order, customer)` button (`po-order-print-<id>`) that opens a clean A4 window with that single order — no dashboard UI, no bundling.
+- Customer portal remains **numbered-cards-only** — no fallback to quantity stock ever.
+
 ## Delivered v1.8 (2026-02-05) — Public order = numbered cards only
 - `POST /api/public/card-order/request` no longer falls back to quantity stock. It counts available numbered cards for the requested category; if `numbered_avail < quantity` it rejects with exact message **"لا تتوفر كمية الكروت المطلوبة"** and logs a `rejected_no_stock` attempt.
 - `GET /api/public/card-order/categories` now returns `available_numbered` per category so the UI can prevent the user before submitting.
