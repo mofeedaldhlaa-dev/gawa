@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { fmt, fmtDate, openWhatsApp } from "@/lib/utils";
+import { fmt, fmtDate, openWhatsApp, deviceId } from "@/lib/utils";
 import { printPublicOrder } from "@/lib/print";
 import { Wifi, CheckCircle, Copy, KeyRound, Phone, Ban, AlertCircle, Printer, History, Search } from "lucide-react";
 
@@ -47,7 +47,7 @@ export default function PublicOrder() {
     if (!phone || !password) { setLoginError("أدخل رقم الهاتف وكلمة المرور"); return; }
     setLoading(true);
     try {
-      const r = await api.post("/public/card-order/login", { phone, password });
+      const r = await api.post("/public/card-order/login", { phone, password, device_id: deviceId() });
       setCustomer(r.data);
       const cr = await api.get("/public/card-order/categories");
       setCats(cr.data);

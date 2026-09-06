@@ -5,6 +5,14 @@ Owner: mofeedaldhlaa@gmail.com • 784225716 • المخاء
 ## Stack
 FastAPI + MongoDB + React (RTL) + JWT + IndexedDB + wa.me
 
+## Delivered v2.0 (2026-02-06) — Device binding + customer-service unbind
+- **Zero-extra-query bind check** in `POST /api/public/card-order/login`: after the existing password verify, the endpoint reads the `bound_device` field it already has in `customer` and compares to the incoming `device_id`. First login binds silently; matching device → allow; mismatched device → HTTP 403 with the exact required text «الهاتف غير مرتبط بالحساب. إذا قمت باستبدال هاتفك القديم، يرجى التواصل مع خدمة العملاء لطلب كلمة المرور.» A wrong device does NOT count as a password-failed attempt.
+- **New admin endpoint** `POST /api/customers/{cid}/unbind-device` (perm `customers`) clears `bound_device`, pushes a `device_history` entry (`unbound_at`/`unbound_by`/`was`), and writes an `audit_log` row (`action=unbind_device`).
+- **`PublicOrder.jsx`** sends `device_id: deviceId()` (already-persistent per-browser uuid from `lib/utils`) in the login body — no new client work, no extra request.
+- **`Customers.jsx` PasswordDialog** now has two sections: change password + "إلغاء ربط الجهاز الحالي" (with the current bound device shown, a confirm prompt, and disabled state if none). Data-testids: `admin-cust-unbind`, `cust-bound-device`.
+- Existing password reset flow (`POST /api/customers/{cid}/password`) unchanged. Existing `audit_log` records password reset as `reset_password`.
+- Impact on cost: **1 extra `set` write on first login only, 0 extra reads per login**. No additional API calls, no extra background jobs.
+
 ## Delivered v1.9 (2026-02-06) — Public order pricing + history
 - **Hide numbered-availability count from customer** while keeping the internal validation intact. The category dropdown now shows only `name - price` (no `متوفر X`), the standalone availability hint was removed, and the client still disables the request button when `quantity > available_numbered` and shows the exact red text «لا تتوفر كمية الكروت المطلوبة». Backend keeps returning `available_numbered` (used only for internal checks).
 - **Per-customer-type pricing:** `POST /api/public/card-order/request` now picks `sale_price_pos` for POS-type customers and `sale_price_customer` otherwise (falls back to `sale_price` if not defined). `/api/public/card-order/categories` exposes both `sale_price_customer` and `sale_price_pos`. UI shows a live "السعر (نقطة بيع|عميل)" + "الإجمالي" preview before submit (`data-testid=po-price-preview`).

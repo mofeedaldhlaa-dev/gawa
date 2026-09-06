@@ -258,6 +258,7 @@ class ReceiptIn(BaseModel):
 class CardOrderPublicLogin(BaseModel):
     phone: str
     password: str
+    device_id: Optional[str] = None
 
 class CardOrderRequest(BaseModel):
     phone: str
@@ -1369,6 +1370,20 @@ async def public_login(data: CardOrderPublicLogin):
         raise HTTPException(status_code=401, detail="كلمة السر غير صحيحة")
     if customer.get("status") == "disabled":
         raise HTTPException(status_code=403, detail="الحساب معطل")
+    # Device binding check (single field, no extra query). First-time binds silently.
+    bound = customer.get("bound_device")
+    incoming = (data.device_id or "").strip()
+    if bound and incoming and bound != incoming:
+        # Do NOT count as a password-failed attempt; the password was correct.
+        raise HTTPException(
+            status_code=403,
+            detail="الهاتف غير مرتبط بالحساب. إذا قمت باستبدال هاتفك القديم، يرجى التواصل مع خدمة العملاء لطلب كلمة المرور.",
+        )
+    if not bound and incoming:
+        await db.customers.update_one(
+            {"id": customer["id"]},
+            {"$set": {"bound_device": incoming, "bound_device_at": now_iso()}},
+        )
     # reset failed counter on success
     await db.public_blocks.update_one({"phone": data.phone}, {"$set": {"failed": 0}}, upsert=True)
     return {
@@ -1751,6 +1766,22 @@ async def backup_restore(payload: BackupRestoreIn, user=Depends(require_perm("ba
 
 
 # ================= CUSTOMER PASSWORD REVEAL =================
+@api.post("/customers/{cid}/unbind-device")
+async def unbind_customer_device(cid: str, user=Depends(require_perm("customers"))):
+    """Clear the customer's bound device so the next successful login (with the
+    new/reset password) binds the new phone automatically."""
+    doc = await db.customers.find_one({"id": cid})
+    if not doc: raise HTTPException(status_code=404, detail="غير موجود")
+    old_device = doc.get("bound_device")
+    await db.customers.update_one(
+        {"id": cid},
+        {"$set": {"bound_device": None, "bound_device_at": None},
+         "$push": {"device_history": {"unbound_at": now_iso(), "unbound_by": user.get("username"), "was": old_device}}},
+    )
+    await audit_log(user, "unbind_device", "customer", cid, {"bound_device": old_device}, {"bound_device": None})
+    return {"ok": True}
+
+
 @api.get("/customers/{cid}/password")
 async def get_customer_password(cid: str, user=Depends(require_perm("customers"))):
     c = await db.customers.find_one({"id": cid})

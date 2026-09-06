@@ -54,6 +54,7 @@ function CustomerForm({ initial, onSaved, onClose }) {
 function PasswordDialog({ customer, onClose, onSaved }) {
   const [pwd, setPwd] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [unbinding, setUnbinding] = useState(false);
   const save = async () => {
     if (pwd !== confirm) { toast.error("كلمة المرور وتأكيدها غير متطابقين"); return; }
     if (pwd.length < 4) { toast.error("كلمة المرور قصيرة"); return; }
@@ -63,14 +64,40 @@ function PasswordDialog({ customer, onClose, onSaved }) {
       onSaved(); onClose();
     } catch (e) { toast.error(errText(e)); }
   };
+  const unbind = async () => {
+    if (!window.confirm(`إلغاء ربط الجهاز الحالي عن ${customer.name}؟\nسيتمكن العميل من تسجيل الدخول من جهاز جديد وسيُربط تلقائياً.`)) return;
+    setUnbinding(true);
+    try {
+      await api.post(`/customers/${customer.id}/unbind-device`);
+      toast.success("تم إلغاء ربط الجهاز. يمكن للعميل الآن تسجيل الدخول من جهاز جديد.");
+      onSaved();
+    } catch (e) { toast.error(errText(e)); }
+    setUnbinding(false);
+  };
+  const isBound = !!customer?.bound_device;
   return (
     <Dialog open onOpenChange={onClose}>
       <DialogContent>
-        <DialogHeader><DialogTitle>تغيير كلمة مرور {customer?.name}</DialogTitle></DialogHeader>
-        <div className="space-y-3">
-          <div><Label>كلمة المرور الجديدة</Label><Input type="password" value={pwd} onChange={(e) => setPwd(e.target.value)} data-testid="admin-cust-pwd"/></div>
-          <div><Label>تأكيد كلمة المرور</Label><Input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} data-testid="admin-cust-pwd-confirm"/></div>
-          <Button onClick={save} className="w-full bg-[#221340]" data-testid="admin-cust-pwd-save">حفظ</Button>
+        <DialogHeader><DialogTitle>إدارة حساب {customer?.name}</DialogTitle></DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <div className="font-bold text-sm text-[#221340]">تغيير كلمة المرور</div>
+            <div><Label>كلمة المرور الجديدة</Label><Input type="password" value={pwd} onChange={(e) => setPwd(e.target.value)} data-testid="admin-cust-pwd"/></div>
+            <div><Label>تأكيد كلمة المرور</Label><Input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} data-testid="admin-cust-pwd-confirm"/></div>
+            <Button onClick={save} className="w-full bg-[#221340]" data-testid="admin-cust-pwd-save">حفظ كلمة المرور</Button>
+          </div>
+          <div className="border-t pt-4 space-y-2">
+            <div className="font-bold text-sm text-[#221340]">ربط الجهاز</div>
+            <div className="text-xs text-slate-600">
+              {isBound
+                ? <>الجهاز الحالي: <span className="font-mono bg-slate-100 px-2 py-0.5 rounded" data-testid="cust-bound-device">{String(customer.bound_device).slice(0, 24)}…</span></>
+                : <span className="text-amber-700">لا يوجد جهاز مرتبط — سيُربط تلقائياً بعد أول تسجيل دخول ناجح.</span>}
+            </div>
+            <Button onClick={unbind} disabled={unbinding || !isBound} variant="outline" className="w-full border-amber-500 text-amber-700 disabled:opacity-50" data-testid="admin-cust-unbind">
+              {unbinding ? "جاري..." : "إلغاء ربط الجهاز الحالي"}
+            </Button>
+            <div className="text-[11px] text-slate-500">استخدم هذا الخيار عندما يستبدل العميل هاتفه القديم. سيتمكن من تسجيل الدخول من الجهاز الجديد بكلمة المرور، وسيُربط تلقائياً.</div>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
