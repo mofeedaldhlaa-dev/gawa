@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { fmt, fmtDate, openWhatsApp, deviceId } from "@/lib/utils";
+import { fmt, fmtDate, openWhatsApp, phoneFingerprint } from "@/lib/utils";
 import { printPublicOrder } from "@/lib/print";
 import { Wifi, CheckCircle, Copy, KeyRound, Phone, Ban, AlertCircle, Printer, History, Search } from "lucide-react";
 
@@ -34,6 +34,7 @@ export default function PublicOrder() {
   const [blocked, setBlocked] = useState(false);
   const [selectedCat, setSelectedCat] = useState(null);
   const [loginError, setLoginError] = useState("");
+  const [deviceMismatch, setDeviceMismatch] = useState(false);
   // Previous orders section
   const [showHistory, setShowHistory] = useState(false);
   const [startDate, setStartDate] = useState("");
@@ -41,13 +42,21 @@ export default function PublicOrder() {
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
 
+  const contactCSForDeviceChange = () => {
+    const now = new Date();
+    const msg = `طلب ربط هاتف جديد بحساب طلب الكرت\n\nرقم الهاتف / الحساب: ${phone}\nالتاريخ والوقت: ${now.toLocaleString("en-GB")}\n\nقمت باستبدال هاتفي القديم وأحتاج ربط حسابي بالهاتف الجديد.\nيرجى التواصل معي لإتمام العملية وإرسال كلمة المرور الجديدة.`;
+    openWhatsApp(ADMIN_WHATSAPP, msg);
+    toast.success("تم إرسال طلبك إلى خدمة العملاء، وسيتم التواصل معك لإكمال عملية ربط الهاتف.");
+  };
+
   const login = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
-    setLoginError("");
+    setLoginError(""); setDeviceMismatch(false);
     if (!phone || !password) { setLoginError("أدخل رقم الهاتف وكلمة المرور"); return; }
     setLoading(true);
     try {
-      const r = await api.post("/public/card-order/login", { phone, password, device_id: deviceId() });
+      const fp = await phoneFingerprint();
+      const r = await api.post("/public/card-order/login", { phone, password, device_id: fp });
       setCustomer(r.data);
       const cr = await api.get("/public/card-order/categories");
       setCats(cr.data);
@@ -58,7 +67,11 @@ export default function PublicOrder() {
       if (status === 429) { setBlocked(true); setLoginError(msg); }
       else if (status === 401) { setLoginError("كلمة المرور غير صحيحة"); }
       else if (status === 404) { setLoginError("رقم الهاتف أو كلمة المرور غير صحيحة"); }
-      else if (status === 403) { setLoginError(msg || "الحساب معطل"); }
+      else if (status === 403) {
+        setLoginError(msg || "الحساب معطل");
+        // Detect device-mismatch (backend returns a message that starts with "الهاتف غير مرتبط")
+        if ((msg || "").startsWith("الهاتف غير مرتبط")) setDeviceMismatch(true);
+      }
       else if (!err.response) { setLoginError("تعذر الاتصال بالخادم. تحقق من الإنترنت وحاول مجدداً."); }
       else { setLoginError(msg || "حدث خطأ"); }
     }
@@ -135,8 +148,20 @@ export default function PublicOrder() {
             <div><Label>رقم الهاتف</Label><Input value={phone} onChange={(e) => { setPhone(e.target.value); setLoginError(""); }} data-testid="po-phone" autoComplete="tel" inputMode="tel"/></div>
             <div><Label>كلمة المرور</Label><Input type="password" value={password} onChange={(e) => { setPassword(e.target.value); setLoginError(""); }} data-testid="po-password" autoComplete="current-password"/></div>
             {loginError && (
-              <div className="flex items-start gap-2 rounded-md border border-red-300 bg-red-50 text-red-700 px-3 py-2 text-sm" data-testid="po-login-error" role="alert">
-                <AlertCircle size={16} className="mt-0.5 shrink-0"/><span>{loginError}</span>
+              <div className="rounded-md border border-red-300 bg-red-50 text-red-700 px-3 py-2 text-sm" data-testid="po-login-error" role="alert">
+                <div className="flex items-start gap-2">
+                  <AlertCircle size={16} className="mt-0.5 shrink-0"/><span>{loginError}</span>
+                </div>
+                {deviceMismatch && (
+                  <Button
+                    type="button"
+                    onClick={contactCSForDeviceChange}
+                    className="mt-3 w-full bg-green-600 hover:bg-green-700 text-white"
+                    data-testid="po-contact-cs-device"
+                  >
+                    <Phone size={14} className="ml-1"/> إرسال لخدمة العملاء
+                  </Button>
+                )}
               </div>
             )}
             <Button type="submit" disabled={loading} className="w-full bg-[#221340]" data-testid="po-login">{loading?"جاري...":"دخول"}</Button>

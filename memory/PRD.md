@@ -5,6 +5,12 @@ Owner: mofeedaldhlaa@gmail.com • 784225716 • المخاء
 ## Stack
 FastAPI + MongoDB + React (RTL) + JWT + IndexedDB + wa.me
 
+## Delivered v2.1 (2026-02-06) — Phone-based fingerprint + contact CS button
+- **`phoneFingerprint()`** helper in `lib/utils.js`: async SHA-256 hash over hardware-only signals — `navigator.platform`, `screen.WxHxColorDepth`, `devicePixelRatio`, timezone, `hardwareConcurrency`, `deviceMemory`, `maxTouchPoints`, `userAgentData.platform`. Deliberately excludes userAgent and canvas (both vary per browser). Result is stable across DIFFERENT BROWSERS on the SAME phone; changes only when the actual phone changes. Falls back to a DJB2 hash if SubtleCrypto is unavailable.
+- **`PublicOrder.jsx`** now uses `phoneFingerprint()` instead of the browser-localStorage `deviceId()`. When the backend returns 403 with a message starting with «الهاتف غير مرتبط» the UI now shows the standard red error AND a large green button **«إرسال لخدمة العملاء»** (`data-testid=po-contact-cs-device`). Clicking it opens WhatsApp to `ADMIN_WHATSAPP` (784225716) with a pre-filled request that includes the account phone and timestamp, and toasts «تم إرسال طلبك إلى خدمة العملاء، وسيتم التواصل معك لإكمال عملية ربط الهاتف».
+- **Backend unchanged** — the 403 message it already returns matches what the UI expects. No new endpoints. Zero extra queries per login.
+- **Tested:** curl scenarios ↑ 200/200/403 pass; Playwright on 375px shows the error + green button + no page overflow.
+
 ## Delivered v2.0 (2026-02-06) — Device binding + customer-service unbind
 - **Zero-extra-query bind check** in `POST /api/public/card-order/login`: after the existing password verify, the endpoint reads the `bound_device` field it already has in `customer` and compares to the incoming `device_id`. First login binds silently; matching device → allow; mismatched device → HTTP 403 with the exact required text «الهاتف غير مرتبط بالحساب. إذا قمت باستبدال هاتفك القديم، يرجى التواصل مع خدمة العملاء لطلب كلمة المرور.» A wrong device does NOT count as a password-failed attempt.
 - **New admin endpoint** `POST /api/customers/{cid}/unbind-device` (perm `customers`) clears `bound_device`, pushes a `device_history` entry (`unbound_at`/`unbound_by`/`was`), and writes an `audit_log` row (`action=unbind_device`).

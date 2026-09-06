@@ -43,6 +43,35 @@ export const deviceId = () => {
   return id;
 };
 
+/**
+ * Hardware-based phone fingerprint. Stable across DIFFERENT BROWSERS on the
+ * SAME phone (does NOT use userAgent or canvas, which vary per browser).
+ * Uses only OS/hardware-level signals that every mobile browser exposes.
+ * Returns a 32-char hex hash. Async because we hash with SubtleCrypto.
+ */
+export const phoneFingerprint = async () => {
+  const parts = [
+    navigator.platform || "",
+    `${screen.width}x${screen.height}x${screen.colorDepth || 0}`,
+    `${window.devicePixelRatio || 1}`,
+    (Intl.DateTimeFormat().resolvedOptions().timeZone) || "",
+    `${navigator.hardwareConcurrency || 0}`,
+    `${navigator.deviceMemory || 0}`,
+    `${navigator.maxTouchPoints || 0}`,
+    (navigator.userAgentData?.platform) || "",
+  ].join("|");
+  try {
+    const buf = new TextEncoder().encode(parts);
+    const hash = await crypto.subtle.digest("SHA-256", buf);
+    return "ph-" + Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 32);
+  } catch {
+    // Fallback: DJB2-ish hash so login still works on very old browsers.
+    let h = 5381;
+    for (let i = 0; i < parts.length; i++) h = ((h << 5) + h + parts.charCodeAt(i)) | 0;
+    return "ph-" + (h >>> 0).toString(16);
+  }
+};
+
 export const openWhatsApp = (phone, text) => {
   if (!phone) {
     alert("لا يوجد رقم هاتف مسجل لهذا الحساب.");
