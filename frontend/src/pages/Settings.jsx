@@ -16,6 +16,7 @@ export default function SettingsPage() {
   const [backupEmail, setBackupEmail] = useState("");
   const [savingEmail, setSavingEmail] = useState(false);
   const [backupSettings, setBackupSettings] = useState({ time: "02:00", auto: false });
+  const [savingAuto, setSavingAuto] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
   const [resetForm, setResetForm] = useState({ username: "", password: "" });
 
@@ -23,6 +24,10 @@ export default function SettingsPage() {
     api.get("/settings").then((r) => {
       setS(r.data);
       setBackupEmail(r.data.backup_email || "");
+      setBackupSettings({
+        time: r.data.backup_time || "02:00",
+        auto: !!r.data.backup_auto,
+      });
     });
   }, []);
 
@@ -43,6 +48,24 @@ export default function SettingsPage() {
       toast.success("تم حفظ البريد الإلكتروني بنجاح.");
     } catch (e) { toast.error(errText(e)); }
     setSavingEmail(false);
+  };
+
+  const saveBackupAuto = async () => {
+    const time = backupSettings.time || "02:00";
+    if (!/^\d{2}:\d{2}$/.test(time)) {
+      toast.error("الرجاء إدخال وقت صحيح بصيغة HH:MM.");
+      return;
+    }
+    if (backupSettings.auto && !((backupEmail || "").trim())) {
+      toast.error("يرجى حفظ البريد الإلكتروني للنسخ أولاً قبل تفعيل النسخ التلقائي.");
+      return;
+    }
+    setSavingAuto(true);
+    try {
+      await api.post("/settings", { backup_time: time, backup_auto: !!backupSettings.auto });
+      toast.success(backupSettings.auto ? "تم تفعيل النسخ الاحتياطي التلقائي." : "تم حفظ إعدادات النسخ التلقائي.");
+    } catch (e) { toast.error(errText(e)); }
+    setSavingAuto(false);
   };
 
   const exportBackup = async () => {
@@ -116,9 +139,17 @@ export default function SettingsPage() {
           </Button>
         </div>
         <div className="pt-3 border-t space-y-3">
-          <div><Label>وقت النسخ اليومي</Label><Input type="time" value={backupSettings.time} onChange={(e) => setBackupSettings({ ...backupSettings, time: e.target.value })}/></div>
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={backupSettings.auto} onChange={(e) => setBackupSettings({ ...backupSettings, auto: e.target.checked })}/> تفعيل النسخ الاحتياطي التلقائي</label>
-          <div className="flex gap-2 flex-wrap">
+          <div><Label>وقت النسخ اليومي</Label><Input type="time" value={backupSettings.time} onChange={(e) => setBackupSettings({ ...backupSettings, time: e.target.value })} data-testid="backup-time"/></div>
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={backupSettings.auto} onChange={(e) => setBackupSettings({ ...backupSettings, auto: e.target.checked })} data-testid="backup-auto-toggle"/> تفعيل النسخ الاحتياطي التلقائي</label>
+          <Button
+            onClick={saveBackupAuto}
+            disabled={savingAuto}
+            className="bg-[#452480] hover:bg-[#5A2FA0] w-full sm:w-auto"
+            data-testid="backup-auto-save"
+          >
+            {savingAuto ? "جاري..." : "حفظ إعدادات النسخ التلقائي"}
+          </Button>
+          <div className="flex gap-2 flex-wrap pt-3 border-t">
             <Button onClick={exportBackup} className="bg-[#221340]" data-testid="backup-export"><Download size={14} className="ml-1"/> إنشاء نسخة الآن</Button>
             <label className="inline-flex">
               <input type="file" accept=".json" onChange={uploadBackup} className="hidden" data-testid="backup-upload"/>

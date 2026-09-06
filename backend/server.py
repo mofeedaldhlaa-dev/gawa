@@ -277,6 +277,8 @@ class SettingsIn(BaseModel):
     currency: Optional[str] = None
     logo_url: Optional[str] = None
     backup_email: Optional[str] = None
+    backup_time: Optional[str] = None
+    backup_auto: Optional[bool] = None
 
 
 # ================= AUTH =================
@@ -1849,6 +1851,8 @@ async def get_settings(user=Depends(get_current_user)):
         "logo_url": doc.get("logo_url", ""),
         "low_stock_default": doc.get("low_stock_default", 20),
         "backup_email": doc.get("backup_email", ""),
+        "backup_time": doc.get("backup_time", "02:00"),
+        "backup_auto": bool(doc.get("backup_auto", False)),
     }
 
 @api.post("/settings")

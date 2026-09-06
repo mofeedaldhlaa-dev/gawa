@@ -5,6 +5,11 @@ Owner: mofeedaldhlaa@gmail.com • 784225716 • المخاء
 ## Stack
 FastAPI + MongoDB + React (RTL) + JWT + IndexedDB + wa.me
 
+## Delivered v2.6 (2026-02-06) — Auto-backup save button
+- **Backend**: `SettingsIn` gains `backup_time: Optional[str]` and `backup_auto: Optional[bool]`. `GET /api/settings` echoes both (defaults `"02:00"` / `false`). Same single-write POST path — no new endpoints.
+- **Settings.jsx**: dedicated **«حفظ إعدادات النسخ التلقائي»** button (`data-testid=backup-auto-save`) below the time input and auto toggle. Sends only `{backup_time, backup_auto}`. Client-side validation: time must match `HH:MM`; enabling auto requires a saved `backup_email` first (friendly toast otherwise). Success toast switches between «تم تفعيل النسخ الاحتياطي التلقائي.» when auto=true and «تم حفظ إعدادات النسخ التلقائي.» when auto=false. Values load once on page mount.
+- Cost: 1 write per save, 0 extra reads.
+
 ## Bug fix v2.5.1 (2026-02-06) — /order register endpoint mismatch
 - **Root cause**: `PublicOrder.jsx` RegisterForm was calling `POST /public/customer/register` (404) — the actual backend endpoint is `/public/customer/register-request`. Every attempt to create an account from the customer portal displayed a generic error toast.
 - **Fix**: single-line change in `/app/frontend/src/pages/PublicOrder.jsx:348` aligns the frontend to the backend path.
