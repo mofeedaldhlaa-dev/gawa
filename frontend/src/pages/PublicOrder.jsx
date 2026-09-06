@@ -345,7 +345,7 @@ function RegisterForm({ onClose }) {
     e.preventDefault();
     setLoading(true);
     try {
-      await api.post("/public/customer/register", f);
+      await api.post("/public/customer/register-request", f);
       const now = new Date();
       const msg = `طلب إنشاء حساب جديد\n\nاسم العميل: ${f.full_name}\nرقم الهاتف: ${f.phone}\nالعنوان: ${f.address || "-"}\n\nيرجى الموافقة على الطلب.\n\n${now.toLocaleString("en-GB")}`;
       openWhatsApp(ADMIN_WHATSAPP, msg);

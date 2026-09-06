@@ -5,6 +5,11 @@ Owner: mofeedaldhlaa@gmail.com • 784225716 • المخاء
 ## Stack
 FastAPI + MongoDB + React (RTL) + JWT + IndexedDB + wa.me
 
+## Bug fix v2.5.1 (2026-02-06) — /order register endpoint mismatch
+- **Root cause**: `PublicOrder.jsx` RegisterForm was calling `POST /public/customer/register` (404) — the actual backend endpoint is `/public/customer/register-request`. Every attempt to create an account from the customer portal displayed a generic error toast.
+- **Fix**: single-line change in `/app/frontend/src/pages/PublicOrder.jsx:348` aligns the frontend to the backend path.
+- **Verified via testing_agent (iteration_7.json)**: 5/5 pytest backend cases + Playwright mobile E2E — unique registration succeeds with the toast «تم إرسال الطلب، سيتم التواصل معك قريباً»; duplicate 777777777 shows the exact Arabic error «رقم الهاتف مرتبط بحساب عميل آخر.». Network capture confirms the request now goes to `/register-request` and no request is sent to the old path.
+
 ## Delivered v2.5 (2026-02-06) — Backup email setting
 - **Backend**: `SettingsIn` gains an optional `backup_email` field. `POST /api/settings` validates the address at the API boundary (`^[^\s@]+@[^\s@]+\.[^\s@]+$`) and returns 400 «البريد الإلكتروني غير صحيح» on bad input; empty string is accepted to clear the setting. `GET /api/settings` echoes the saved value (default `""`).
 - **Settings.jsx**: dedicated field «البريد الإلكتروني للنسخ الاحتياطية» inside the backup card, with its own **«حفظ البريد الإلكتروني»** button (`data-testid=backup-email-save`) that only PATCHes `{backup_email}` — no full-settings roundtrip, no backup trigger. On success shows the exact toast «تم حفظ البريد الإلكتروني بنجاح.»; on invalid input shows «البريد الإلكتروني غير صحيح. يرجى إدخال بريد إلكتروني صالح.». Value is loaded once on page mount from `/settings`.
