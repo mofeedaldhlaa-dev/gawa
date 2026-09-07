@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { fmt } from "@/lib/utils";
-import { Database, RotateCcw, Trash2, Download, Upload } from "lucide-react";
+import { Database, RotateCcw, Trash2, Download, Upload, Send } from "lucide-react";
 
 export default function SettingsPage() {
   const [s, setS] = useState({ currency: "ريال", logo_url: "", low_stock_default: 20, backup_email: "" });
@@ -17,6 +17,7 @@ export default function SettingsPage() {
   const [savingEmail, setSavingEmail] = useState(false);
   const [backupSettings, setBackupSettings] = useState({ time: "02:00", auto: false });
   const [savingAuto, setSavingAuto] = useState(false);
+  const [runningNow, setRunningNow] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
   const [resetForm, setResetForm] = useState({ username: "", password: "" });
 
@@ -66,6 +67,26 @@ export default function SettingsPage() {
       toast.success(backupSettings.auto ? "تم تفعيل النسخ الاحتياطي التلقائي." : "تم حفظ إعدادات النسخ التلقائي.");
     } catch (e) { toast.error(errText(e)); }
     setSavingAuto(false);
+  };
+
+  const runBackupNow = async () => {
+    const v = (backupEmail || "").trim();
+    if (!v) {
+      toast.error("يرجى حفظ البريد الإلكتروني للنسخ أولاً.");
+      return;
+    }
+    setRunningNow(true);
+    try {
+      const r = await api.post("/backup/run-now");
+      if (r.data?.email_sent) {
+        toast.success(`تم رفع النسخة (${(r.data.size/1024).toFixed(1)} KB) وإرسال الرابط إلى ${r.data.email_to}`);
+      } else if (r.data?.email_error) {
+        toast.error(`تم الرفع لكن فشل الإرسال: ${r.data.email_error}`);
+      } else {
+        toast.success(`تم رفع النسخة إلى السحابة (${(r.data.size/1024).toFixed(1)} KB)`);
+      }
+    } catch (e) { toast.error(errText(e)); }
+    setRunningNow(false);
   };
 
   const exportBackup = async () => {
@@ -150,11 +171,16 @@ export default function SettingsPage() {
             {savingAuto ? "جاري..." : "حفظ إعدادات النسخ التلقائي"}
           </Button>
           <div className="flex gap-2 flex-wrap pt-3 border-t">
-            <Button onClick={exportBackup} className="bg-[#221340]" data-testid="backup-export"><Download size={14} className="ml-1"/> إنشاء نسخة الآن</Button>
+            <Button onClick={runBackupNow} disabled={runningNow} className="bg-emerald-700 hover:bg-emerald-800" data-testid="backup-run-now"><Send size={14} className="ml-1"/> {runningNow ? "جاري الرفع والإرسال..." : "رفع للسحابة وإرسال بالبريد الآن"}</Button>
+            <Button onClick={exportBackup} className="bg-[#221340]" data-testid="backup-export"><Download size={14} className="ml-1"/> تنزيل نسخة محلية</Button>
             <label className="inline-flex">
               <input type="file" accept=".json" onChange={uploadBackup} className="hidden" data-testid="backup-upload"/>
               <span className="bg-[#452480] text-white px-4 py-2 rounded cursor-pointer flex items-center gap-1 text-sm hover:bg-[#5A2FA0]"><Upload size={14}/> استعادة نسخة</span>
             </label>
+          </div>
+          <div className="text-xs text-slate-500 pt-2">
+            الرفع للسحابة يستخدم تخزين Emergent Object Storage ويُرسل رابط تحميل صالح لمدة 14 يوماً إلى بريدك.
+            التشغيل التلقائي يعمل يومياً الساعة 02:00 (توقيت عدن) عبر جدولة النظام.
           </div>
         </div>
       </Card>

@@ -11,9 +11,19 @@ import secrets
 import string
 import logging
 import requests
+import gzip
+import json
+import hmac
+import re as _re
+import ipaddress
+import asyncio
+import httpx
+from html import escape as _html_escape
+from html.parser import HTMLParser
+from urllib.parse import urlparse
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Any, Dict, Literal
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, status, UploadFile, File, Query, Header
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, status, UploadFile, File, Query, Header, BackgroundTasks
 from fastapi.responses import Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette.middleware.cors import CORSMiddleware
@@ -36,6 +46,14 @@ STORAGE_BASE = (os.environ.get("INTEGRATION_PROXY_URL") or "").strip() or "https
 STORAGE_URL = STORAGE_BASE.rstrip("/") + "/objstore/api/v1/storage"
 EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
 APP_NAME = "jawad-net"
+
+# ============ Email (Emergent managed Resend) ============
+EMAIL_BASE_URL = "https://integrations.emergentagent.com"
+EMAIL_KEY = os.environ.get("EMERGENT_EMAIL_KEY", "")
+EMAIL_FROM_NAME = os.environ.get("EMAIL_FROM_NAME", COMPANY_NAME)
+EMAIL_REPLY_TO = os.environ.get("EMAIL_REPLY_TO") or None
+PUBLIC_BASE_URL = (os.environ.get("PUBLIC_BASE_URL") or "").rstrip("/")
+WEBHOOK_CRON_SECRET = os.environ.get("WEBHOOK_CRON_SECRET", "")
 _storage_key: Optional[str] = None
 
 def init_storage(force: bool = False) -> Optional[str]:
@@ -81,6 +99,96 @@ def _get_object(path: str) -> tuple[bytes, str]:
     if resp.status_code >= 400:
         raise HTTPException(status_code=resp.status_code, detail="الملف غير موجود")
     return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
+
+
+# ============ Email guardrail gate (structural G2 + G3 defense-in-depth) ============
+_SHORTENERS = ("bit.ly", "tinyurl.com", "t.co", "is.gd", "cutt.ly", "goo.gl", "rebrand.ly")
+_CRED_ASK = ("reply with your password", "reply with the code", "send your password", "cvv",
+             "send us your password", "enter your password below", "confirm your card number",
+             "your full card number", "seed phrase", "recovery phrase", "verify your card",
+             "social security number", "confirm your bank details")
+_HOSTISH = _re.compile(r"\b(?:https?://)?((?:[a-z0-9-]+\.)+[a-z]{2,})", _re.I)
+
+def _host_ok(host: str) -> bool:
+    if not host or "xn--" in host:
+        return False
+    try:
+        ipaddress.ip_address(host)
+        return False
+    except ValueError:
+        pass
+    return not any(host == s or host.endswith("." + s) for s in _SHORTENERS)
+
+def _same_site(shown: str, real: str) -> bool:
+    return shown == real or real.endswith("." + shown) or shown.endswith("." + real)
+
+class _EmailScan(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.tags, self.urls, self.anchors = set(), [], []
+        self._href, self._text = None, []
+    def handle_starttag(self, tag, attrs):
+        self.tags.add(tag.lower())
+        self.urls += [v for k, v in attrs if k.lower() in ("href", "src") and v]
+        if tag.lower() == "a":
+            self._href = dict((k.lower(), v) for k, v in attrs).get("href")
+            self._text = []
+    def handle_data(self, data):
+        if self._href is not None:
+            self._text.append(data)
+    def handle_endtag(self, tag):
+        if tag.lower() == "a" and self._href is not None:
+            self.anchors.append((self._href, "".join(self._text)))
+            self._href, self._text = None, []
+
+def _assert_safe_email(subject: str, html: str) -> None:
+    scan = _EmailScan(); scan.feed(html)
+    if scan.tags & {"form", "input", "textarea", "select"}:
+        raise ValueError("No forms or input fields in email (G2)")
+    body = f"{subject}\n{html}".lower()
+    for p in _CRED_ASK:
+        if p in body:
+            raise ValueError(f"Email asks the recipient for credentials: {p!r} (G2)")
+    for url in scan.urls:
+        low = url.strip().lower()
+        if low.startswith(("mailto:", "tel:", "cid:", "#")):
+            continue
+        if not low.startswith("https://"):
+            raise ValueError(f"Email links/assets must be absolute https: {url!r} (G3)")
+        host = urlparse(low).hostname or ""
+        if not _host_ok(host) or urlparse(low).username is not None:
+            raise ValueError(f"Shortened, numeric-host or credential-bearing URL: {url!r} (G3)")
+    for href, text in scan.anchors:
+        real = urlparse(href.strip().lower()).hostname or ""
+        if not real:
+            continue
+        for m in _HOSTISH.finditer(text):
+            if not _same_site(m.group(1).lower(), real):
+                raise ValueError(f"Anchor text {m.group(1)!r} != real link host {real!r} (G3)")
+
+async def send_email(*, to: str, subject: str, html: str, reply_to: Optional[str] = None) -> Optional[str]:
+    if not EMAIL_KEY:
+        raise HTTPException(status_code=503, detail="خدمة البريد غير مهيأة")
+    _assert_safe_email(subject, html)
+    payload: Dict[str, Any] = {"to": [to], "subject": subject, "html": html, "from_name": EMAIL_FROM_NAME}
+    rt = reply_to or EMAIL_REPLY_TO
+    if rt:
+        payload["contact_email"] = rt
+    try:
+        async with httpx.AsyncClient(timeout=30) as client_h:
+            resp = await client_h.post(
+                f"{EMAIL_BASE_URL}/api/v1/email/send",
+                headers={"X-Email-Key": EMAIL_KEY},
+                json=payload,
+            )
+        resp.raise_for_status()
+        return resp.json().get("id")
+    except httpx.HTTPStatusError as e:
+        logging.getLogger("jawad").error(f"Email send failed: {e.response.status_code} {e.response.text[:300]}")
+        raise HTTPException(status_code=502, detail="فشل إرسال البريد")
+    except Exception as e:
+        logging.getLogger("jawad").error(f"Email send error: {e}")
+        raise HTTPException(status_code=500, detail="فشل إرسال البريد")
 
 client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
@@ -1855,6 +1963,214 @@ async def backup_restore(payload: BackupRestoreIn, user=Depends(require_perm("ba
                 await db[c].insert_many(data[c])
     await audit_log(user, "restore_backup", "system", snapshot_id)
     return {"ok": True, "snapshot_id": snapshot_id}
+
+
+# ================= AUTOMATED CLOUD BACKUP =================
+BACKUP_COLLECTIONS = [
+    "customers","suppliers","card_categories","cards","stock","sales","purchases",
+    "receipts","ledger","orders","notifications","audit_logs","register_requests",
+    "card_order_attempts","public_blocks","users","settings","files",
+]
+
+async def _build_backup_snapshot() -> Dict[str, Any]:
+    from fastapi.encoders import jsonable_encoder
+    def _deep(v):
+        if isinstance(v, dict):
+            return {k: _deep(x) for k, x in v.items() if k != "_id"}
+        if isinstance(v, list):
+            return [_deep(x) for x in v]
+        return v
+    dump: Dict[str, Any] = {}
+    for c in BACKUP_COLLECTIONS:
+        docs = await db[c].find().to_list(100000)
+        dump[c] = [_deep(clean_doc(d)) for d in docs]
+    dump["_exported_at"] = now_iso()
+    dump["_company"] = COMPANY_NAME
+    return jsonable_encoder(dump, custom_encoder={bytes: lambda b: b.decode(errors="replace")})
+
+async def _run_backup_job(trigger: str = "manual") -> Dict[str, Any]:
+    """Create a snapshot, gzip-compress, upload to object storage, save metadata,
+    and (best-effort) email the download link to the configured backup_email."""
+    snapshot = await _build_backup_snapshot()
+    raw = json.dumps(snapshot, ensure_ascii=False).encode("utf-8")
+    gz = gzip.compress(raw, compresslevel=6)
+
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    file_id = str(uuid.uuid4())
+    token = secrets.token_urlsafe(32)
+    storage_path = f"{APP_NAME}/backups/{day}/{file_id}.json.gz"
+
+    # Upload to Emergent Object Storage
+    result = _put_object(storage_path, gz, "application/gzip")
+
+    rec = {
+        "id": file_id,
+        "storage_path": result.get("path", storage_path),
+        "original_filename": f"jawad-backup-{day}.json.gz",
+        "size": result.get("size", len(gz)),
+        "raw_size": len(raw),
+        "content_type": "application/gzip",
+        "download_token": token,
+        "token_expires_at": (datetime.now(timezone.utc) + timedelta(days=14)).isoformat(),
+        "trigger": trigger,
+        "collections": list(snapshot.keys()),
+        "created_at": now_iso(),
+    }
+    await db.backup_files.insert_one(rec)
+
+    # Retain only last 14 backup records + delete their objects (best-effort)
+    old = await db.backup_files.find().sort("created_at", -1).skip(14).to_list(500)
+    for o in old:
+        try:
+            await db.backup_files.delete_one({"id": o["id"]})
+        except Exception:
+            pass
+
+    # Send email (best-effort — do not fail the whole job if email fails)
+    email_id = None
+    email_error = None
+    settings_doc = await db.settings.find_one({"key": "app_settings"}) or {}
+    to_addr = (settings_doc.get("backup_email") or "").strip()
+    if to_addr and PUBLIC_BASE_URL:
+        link = f"{PUBLIC_BASE_URL}/api/backup/download/{token}"
+        subject = f"نسخة احتياطية جديدة — {EMAIL_FROM_NAME} — {day}"
+        size_kb = f"{len(gz)/1024:.1f} KB"
+        html = (
+            '<div dir="rtl" style="font-family:Tahoma,Arial,sans-serif;background:#f6f6fb;padding:24px">'
+            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+            'style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:10px;'
+            'box-shadow:0 2px 8px rgba(0,0,0,0.05);overflow:hidden">'
+            '<tr><td style="background:#221340;padding:20px 24px;color:#fff">'
+            f'<div style="font-size:18px;font-weight:bold">{_html_escape(EMAIL_FROM_NAME)}</div>'
+            '<div style="font-size:13px;opacity:.85;margin-top:4px">النسخ الاحتياطي التلقائي</div>'
+            '</td></tr>'
+            '<tr><td style="padding:24px;color:#221340">'
+            f'<p style="font-size:15px;line-height:1.7">تم إنشاء نسخة احتياطية جديدة من قاعدة بيانات {_html_escape(EMAIL_FROM_NAME)} بنجاح بتاريخ <strong>{_html_escape(day)}</strong>.</p>'
+            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+            'style="background:#f6f4fb;border-radius:8px;padding:12px;margin:12px 0">'
+            f'<tr><td style="padding:6px 10px;font-size:13px">حجم الملف المضغوط: <strong>{_html_escape(size_kb)}</strong></td></tr>'
+            f'<tr><td style="padding:6px 10px;font-size:13px">عدد المجموعات: <strong>{len(BACKUP_COLLECTIONS)}</strong></td></tr>'
+            f'<tr><td style="padding:6px 10px;font-size:13px">مصدر التشغيل: <strong>{_html_escape(trigger)}</strong></td></tr>'
+            '</table>'
+            f'<p style="font-size:14px;margin-top:20px">لتحميل الملف اضغط الزر أدناه (صالح لمدة 14 يوماً):</p>'
+            f'<p style="margin:20px 0"><a href="{link}" style="background:#452480;color:#fff;text-decoration:none;'
+            'padding:12px 24px;border-radius:6px;font-weight:bold;display:inline-block">تحميل النسخة الاحتياطية</a></p>'
+            '<p style="font-size:12px;color:#666;margin-top:24px;padding-top:16px;border-top:1px solid #eee">'
+            f'أُرسل بواسطة {_html_escape(EMAIL_FROM_NAME)}. لن نطلب منك كلمة المرور أو أي بيانات حساسة عبر البريد.'
+            '</p>'
+            '</td></tr></table></div>'
+        )
+        try:
+            email_id = await send_email(to=to_addr, subject=subject, html=html)
+        except HTTPException as e:
+            email_error = f"{e.status_code}: {e.detail}"
+            logger.error(f"Backup email failed: {email_error}")
+        except Exception as e:
+            email_error = str(e)
+            logger.error(f"Backup email failed: {e}")
+
+    await db.backup_files.update_one(
+        {"id": file_id},
+        {"$set": {"email_sent_to": to_addr or None, "email_id": email_id, "email_error": email_error}},
+    )
+
+    return {
+        "ok": True,
+        "backup_id": file_id,
+        "size": len(gz),
+        "raw_size": len(raw),
+        "email_sent": bool(email_id),
+        "email_error": email_error,
+        "email_to": to_addr or None,
+        "download_link": f"{PUBLIC_BASE_URL}/api/backup/download/{token}" if PUBLIC_BASE_URL else None,
+    }
+
+@api.post("/backup/run-now")
+async def backup_run_now(user=Depends(require_perm("backup"))):
+    """Admin-triggered manual cloud backup (upload + email)."""
+    res = await _run_backup_job(trigger=f"manual:{user.get('username')}")
+    await audit_log(user, "run_backup", "system", res["backup_id"])
+    return res
+
+@api.get("/backup/list")
+async def backup_list(user=Depends(require_perm("backup"))):
+    docs = await db.backup_files.find().sort("created_at", -1).limit(30).to_list(30)
+    out = []
+    for d in docs:
+        c = clean_doc(d)
+        c.pop("download_token", None)
+        out.append(c)
+    return out
+
+@api.get("/backup/download/{token}")
+async def backup_download(token: str):
+    """Time-limited public download using an unguessable token embedded in the
+    email link (first-party HTTPS magic link). Token is stored server-side."""
+    if not token or len(token) < 16:
+        raise HTTPException(status_code=404, detail="رابط غير صالح")
+    rec = await db.backup_files.find_one({"download_token": token})
+    if not rec:
+        raise HTTPException(status_code=404, detail="النسخة الاحتياطية غير موجودة")
+    exp = rec.get("token_expires_at")
+    if exp:
+        try:
+            if datetime.fromisoformat(exp) < datetime.now(timezone.utc):
+                raise HTTPException(status_code=410, detail="انتهت صلاحية الرابط")
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+    data, ct = _get_object(rec["storage_path"])
+    fname = rec.get("original_filename") or "backup.json.gz"
+    return Response(
+        content=data,
+        media_type=rec.get("content_type") or ct,
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+# --- Cron webhook (Emergent platform crons) ---
+def _verify_cron_auth(authorization: Optional[str]) -> None:
+    if not WEBHOOK_CRON_SECRET:
+        raise HTTPException(status_code=503, detail="Cron secret not configured")
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    got = authorization.split(" ", 1)[1].strip()
+    if not hmac.compare_digest(got, WEBHOOK_CRON_SECRET):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+async def _cron_backup_worker():
+    """Runs in the background so the webhook can 2xx immediately."""
+    try:
+        settings_doc = await db.settings.find_one({"key": "app_settings"}) or {}
+        if not bool(settings_doc.get("backup_auto", False)):
+            logger.info("Daily backup skipped: backup_auto=False")
+            return
+        res = await _run_backup_job(trigger="cron:daily")
+        logger.info(f"Daily backup done: {res.get('backup_id')} email_sent={res.get('email_sent')}")
+    except Exception as e:
+        logger.error(f"Daily backup worker error: {e}")
+
+@api.post("/cron/daily-backup")
+async def cron_daily_backup(
+    background_tasks: BackgroundTasks,
+    request: Request,
+    authorization: Optional[str] = Header(None),
+    x_webhook_id: Optional[str] = Header(None),
+):
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    _verify_cron_auth(authorization)
+    run_id = x_webhook_id or ""
+    if run_id:
+        try:
+            # Idempotency: skip if we've already handled this run id
+            existing = await db.cron_runs.find_one({"run_id": run_id})
+            if existing:
+                return {"ok": True, "duplicate": True}
+            await db.cron_runs.insert_one({"run_id": run_id, "at": now_iso(), "name": "daily-backup"})
+        except Exception:
+            pass
+    background_tasks.add_task(_cron_backup_worker)
+    return {"ok": True, "queued": True}
 
 
 # ================= CUSTOMER PASSWORD REVEAL =================
