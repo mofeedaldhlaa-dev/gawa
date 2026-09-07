@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"number":{"$numberInt":"1"}},"name":"number_1","unique":true},{"v":{"$numberInt":"2"},"key":{"idempotency_key":{"$numberInt":"1"}},"name":"idempotency_key_1"}],"uuid":"0e48520586d2421a8668d2c1be47adb7","collectionName":"receipts","type":"collection"}
