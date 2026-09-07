@@ -9,8 +9,8 @@ import { Wifi } from "lucide-react";
 export default function Login() {
   const { login, error, user } = useAuth();
   const nav = useNavigate();
-  const [username, setU] = useState("admin");
-  const [password, setP] = useState("admin123");
+  const [username, setU] = useState("");
+  const [password, setP] = useState("");
   const [loading, setLoading] = useState(false);
 
   if (user) nav("/");
@@ -42,8 +42,8 @@ export default function Login() {
           </div>
           <form onSubmit={submit} className="space-y-4">
             <div>
-              <label className="text-sm mb-1 block font-medium">اسم المستخدم</label>
-              <Input value={username} onChange={(e) => setU(e.target.value)} required data-testid="login-username" className="text-right" />
+              <label className="text-sm mb-1 block font-medium">اسم المستخدم أو البريد الإلكتروني</label>
+              <Input value={username} onChange={(e) => setU(e.target.value)} required data-testid="login-username" placeholder="admin أو you@example.com" autoComplete="username" className="text-right" />
             </div>
             <div>
               <label className="text-sm mb-1 block font-medium">كلمة المرور</label>

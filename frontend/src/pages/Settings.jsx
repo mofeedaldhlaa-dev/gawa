@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { fmt } from "@/lib/utils";
-import { Database, RotateCcw, Trash2, Download, Upload, Send } from "lucide-react";
+import { Database, RotateCcw, Trash2, Download, Upload, Send, CloudDownload } from "lucide-react";
 
 export default function SettingsPage() {
   const [s, setS] = useState({ currency: "ريال", logo_url: "", low_stock_default: 20, backup_email: "" });
@@ -18,6 +18,8 @@ export default function SettingsPage() {
   const [backupSettings, setBackupSettings] = useState({ time: "02:00", auto: false });
   const [savingAuto, setSavingAuto] = useState(false);
   const [runningNow, setRunningNow] = useState(false);
+  const [latestBackup, setLatestBackup] = useState(null);
+  const [restoringCloud, setRestoringCloud] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
   const [resetForm, setResetForm] = useState({ username: "", password: "" });
 
@@ -30,6 +32,9 @@ export default function SettingsPage() {
         auto: !!r.data.backup_auto,
       });
     });
+    api.get("/backup/latest").then((r) => {
+      if (r.data?.exists) setLatestBackup(r.data);
+    }).catch(() => {});
   }, []);
 
   const save = async () => {
@@ -85,8 +90,29 @@ export default function SettingsPage() {
       } else {
         toast.success(`تم رفع النسخة إلى السحابة (${(r.data.size/1024).toFixed(1)} KB)`);
       }
+      // refresh latest
+      const l = await api.get("/backup/latest");
+      if (l.data?.exists) setLatestBackup(l.data);
     } catch (e) { toast.error(errText(e)); }
     setRunningNow(false);
+  };
+
+  const restoreLatestCloud = async () => {
+    if (!latestBackup) {
+      toast.error("لا توجد نسخة سحابية للاستعادة.");
+      return;
+    }
+    const when = (latestBackup.created_at || "").replace("T", " ").slice(0, 16);
+    if (!window.confirm(
+      `سيتم استعادة آخر نسخة سحابية (${when}). سيتم استبدال كل البيانات (باستثناء المستخدمين) بمحتوى النسخة، مع إنشاء نسخة أمان تلقائية أولاً. تأكيد؟`
+    )) return;
+    setRestoringCloud(true);
+    try {
+      const r = await api.post("/backup/restore-latest", { confirm: true });
+      toast.success(`تمت الاستعادة بنجاح — ${r.data?.total_docs || 0} وثيقة من ${Object.keys(r.data?.restored || {}).length} مجموعة.`);
+      setTimeout(() => window.location.reload(), 1500);
+    } catch (e) { toast.error(errText(e)); }
+    setRestoringCloud(false);
   };
 
   const exportBackup = async () => {
@@ -172,12 +198,21 @@ export default function SettingsPage() {
           </Button>
           <div className="flex gap-2 flex-wrap pt-3 border-t">
             <Button onClick={runBackupNow} disabled={runningNow} className="bg-emerald-700 hover:bg-emerald-800" data-testid="backup-run-now"><Send size={14} className="ml-1"/> {runningNow ? "جاري الرفع والإرسال..." : "رفع للسحابة وإرسال بالبريد الآن"}</Button>
+            <Button onClick={restoreLatestCloud} disabled={restoringCloud || !latestBackup} className="bg-amber-600 hover:bg-amber-700 disabled:opacity-50" data-testid="backup-restore-latest"><CloudDownload size={14} className="ml-1"/> {restoringCloud ? "جاري الاستعادة..." : "استعادة آخر نسخة سحابية"}</Button>
             <Button onClick={exportBackup} className="bg-[#221340]" data-testid="backup-export"><Download size={14} className="ml-1"/> تنزيل نسخة محلية</Button>
             <label className="inline-flex">
               <input type="file" accept=".json" onChange={uploadBackup} className="hidden" data-testid="backup-upload"/>
               <span className="bg-[#452480] text-white px-4 py-2 rounded cursor-pointer flex items-center gap-1 text-sm hover:bg-[#5A2FA0]"><Upload size={14}/> استعادة نسخة</span>
             </label>
           </div>
+          {latestBackup ? (
+            <div className="text-xs text-slate-600 bg-slate-50 rounded p-2 mt-2" data-testid="latest-backup-info">
+              آخر نسخة سحابية: <strong>{(latestBackup.created_at || "").replace("T"," ").slice(0,16)}</strong>
+              — الحجم: {(latestBackup.size/1024).toFixed(1)} KB — المصدر: {latestBackup.trigger || "—"}
+            </div>
+          ) : (
+            <div className="text-xs text-slate-500 mt-2">لا توجد نسخة سحابية بعد. اضغط "رفع للسحابة" لإنشاء أول نسخة.</div>
+          )}
           <div className="text-xs text-slate-500 pt-2">
             الرفع للسحابة يستخدم تخزين Emergent Object Storage ويُرسل رابط تحميل صالح لمدة 14 يوماً إلى بريدك.
             التشغيل التلقائي يعمل يومياً الساعة 02:00 (توقيت عدن) عبر جدولة النظام.

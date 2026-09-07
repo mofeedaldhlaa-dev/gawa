@@ -10,50 +10,50 @@ email backups, biometric login, file/media storage.
 ## Stack
 - Frontend: React + TailwindCSS + Shadcn UI (RTL)
 - Backend: FastAPI + Motor (async MongoDB)
-- Database: MongoDB (local — Atlas migration blocked by network policy; kept
-  local per user decision, replaced by cloud backup strategy)
-- Object Storage: Emergent Object Storage (integration proxy)
-- Email: Emergent-managed Resend (integration proxy) — for daily backup emails
+- Database: MongoDB (local — Atlas migration blocked by Atlas IP firewall)
+- Object Storage: Emergent Object Storage
+- Email: Emergent-managed Resend
 - Scheduler: Emergent platform crons (`.emergent/crons.yml`)
 
 ## Implemented (recent)
 - 2026-02: **Automated daily cloud backup + email** (P1 done)
-  - `POST /api/cron/daily-backup` — Bearer-authed webhook, 2xx-ack, backgrounds work
-  - `POST /api/backup/run-now` — admin-triggered manual run
-  - `GET /api/backup/list` — last 30 runs metadata (no token exposed)
-  - `GET /api/backup/download/{token}` — 14-day magic-link download (gzipped JSON)
-  - Retention: keeps last 14 backup records
-  - Cron: daily 02:00 Asia/Aden via `.emergent/crons.yml`
-  - Email: guardrail gate (`_assert_safe_email`) + Arabic RTL HTML template
-  - Settings UI: new "رفع للسحابة وإرسال بالبريد الآن" button in Settings
-- Emergent Object Storage integration (files upload/list/download/delete)
-- Customer portal: previous orders, device binding, POS pricing, hidden stock
-- Full edit mode for Sales & Purchases invoices
-- Mobile responsiveness 320–414px, no horizontal scroll
-- Low-stock alerts split (numbered vs quantity cards)
-- Backup settings UI (email / time / auto toggle) + reveal password on mobile
+  - `POST /api/cron/daily-backup` (Bearer WEBHOOK_CRON_SECRET, ack immediately, background work)
+  - `POST /api/backup/run-now` (admin manual)
+  - `GET /api/backup/list` (last 30 records, tokens hidden)
+  - `GET /api/backup/latest` (metadata of most recent backup)
+  - `POST /api/backup/restore-latest` (restores latest cloud backup, protects `users`, creates pre-restore snapshot)
+  - `GET /api/backup/download/{token}` (14-day public magic-link)
+  - Cron schedule: daily 02:00 Asia/Aden via `.emergent/crons.yml`
+  - Retention: last 14 records
+- 2026-02: **Email OR username login**
+  - `POST /api/auth/login` accepts email in `username` field (case-insensitive)
+  - Multi-user shared-email support: admins are matched first, then password verified against each candidate
+  - Login page label + placeholder updated ("اسم المستخدم أو البريد الإلكتروني")
+- 2026-02: Settings page: "رفع للسحابة وإرسال بالبريد الآن" + "استعادة آخر نسخة سحابية" buttons, latest-backup info banner
+- Emergent Object Storage integration
+- Customer portal enhancements (previous orders, device binding, POS pricing)
+- Full edit mode Sales & Purchases invoices
+- Mobile responsiveness 320–414px
+- Low-stock alerts split (numbered vs quantity)
 
 ## Deferred / Alternatives
-- **MongoDB Atlas migration**: BLOCKED by Atlas IP-level firewall
-  (`TLSV1_ALERT_INTERNAL_ERROR` on all TLS variants). User chose
-  **Option C**: keep local Mongo + automated encrypted cloud backup (done).
-- P0: Biometric login (WebAuthn/Passkeys) — deferred (2 sessions)
-- P2: Separate deployment for `/order` vs admin — needs two Emergent deploys
-- P2: Refactor server.py into routers (currently ~2200 lines)
+- MongoDB Atlas migration BLOCKED by Atlas IP firewall (TLSV1_ALERT_INTERNAL_ERROR).
+  User chose cloud-backup strategy (implemented) as the safer alternative.
+- P0: Biometric login (WebAuthn/Passkeys) — deferred
+- P2: Separate deployment for `/order` vs admin
+- P2: Refactor server.py (~2400 lines) into `routers/`
 
-## Backlog (prioritized)
-- P0: Biometric login (WebAuthn) admin + customer
-- P2: Split `server.py` into `routers/`
-- P2: Customer portal separate deployment guidance
-
-## API cheatsheet (backup)
-- `POST /api/backup/run-now` (auth: admin, perm=backup)
-- `GET  /api/backup/list` (auth: admin, perm=backup)
-- `GET  /api/backup/download/{token}` (public, magic-link, 14d expiry)
-- `POST /api/cron/daily-backup` (Bearer WEBHOOK_CRON_SECRET, backgrounded)
+## API cheatsheet
+- `POST /api/auth/login` — `{username|email, password}`
+- `POST /api/backup/run-now`
+- `GET  /api/backup/list`
+- `GET  /api/backup/latest`
+- `POST /api/backup/restore-latest` — body `{confirm: true}`
+- `GET  /api/backup/download/{token}`
+- `POST /api/cron/daily-backup` — Bearer WEBHOOK_CRON_SECRET, backgrounded
 
 ## Env keys (backend/.env)
 - `EMERGENT_EMAIL_KEY`, `EMAIL_FROM_NAME`, `EMAIL_REPLY_TO`
 - `WEBHOOK_CRON_SECRET`, `PUBLIC_BASE_URL`
-- `EMERGENT_LLM_KEY` (used for object storage init)
-- Preserved (unused now): `MONGODB_ATLAS_URI/USERNAME/PASSWORD`
+- `EMERGENT_LLM_KEY`
+- Preserved but unused: `MONGODB_ATLAS_URI/USERNAME/PASSWORD`

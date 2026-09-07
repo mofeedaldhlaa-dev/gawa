@@ -312,7 +312,7 @@ ALL_PERMS = [
 ]
 
 class LoginIn(BaseModel):
-    username: str
+    username: str  # accepts username OR email address
     password: str
 
 class UserIn(BaseModel):
@@ -445,8 +445,25 @@ class SettingsIn(BaseModel):
 # ================= AUTH =================
 @api.post("/auth/login")
 async def login(data: LoginIn):
-    user = await db.users.find_one({"username": data.username})
-    if not user or not verify_password(data.password, user.get("password_hash", "")):
+    ident = (data.username or "").strip()
+    # Accept username OR email. Email lookup is case-insensitive and tries
+    # every matching user (admins first) so shared-email accounts still work.
+    candidates: List[Dict[str, Any]] = []
+    if "@" in ident:
+        cursor = db.users.find({"email": {"$regex": f"^{_re.escape(ident)}$", "$options": "i"}})
+        candidates = await cursor.to_list(20)
+        # admins first, then most-recently-active
+        candidates.sort(key=lambda u: (0 if u.get("role") == "admin" else 1, -(len(u.get("last_login") or ""))))
+    if not candidates:
+        one = await db.users.find_one({"username": ident})
+        if one:
+            candidates = [one]
+    user = None
+    for cand in candidates:
+        if verify_password(data.password, cand.get("password_hash", "")):
+            user = cand
+            break
+    if not user:
         raise HTTPException(status_code=401, detail="بيانات الدخول غير صحيحة")
     if user.get("status") == "disabled":
         raise HTTPException(status_code=403, detail="الحساب معطل")
@@ -2091,6 +2108,73 @@ async def backup_run_now(user=Depends(require_perm("backup"))):
     res = await _run_backup_job(trigger=f"manual:{user.get('username')}")
     await audit_log(user, "run_backup", "system", res["backup_id"])
     return res
+
+@api.get("/backup/latest")
+async def backup_latest(user=Depends(require_perm("backup"))):
+    """Return metadata of the most recent cloud backup (no download token)."""
+    rec = await db.backup_files.find().sort("created_at", -1).limit(1).to_list(1)
+    if not rec:
+        return {"exists": False}
+    d = clean_doc(rec[0])
+    d.pop("download_token", None)
+    d["exists"] = True
+    return d
+
+class RestoreLatestIn(BaseModel):
+    confirm: bool = False
+
+@api.post("/backup/restore-latest")
+async def backup_restore_latest(payload: RestoreLatestIn, user=Depends(require_perm("backup"))):
+    """Restore the most recent cloud backup. Creates a pre-restore safety snapshot first."""
+    if not payload.confirm:
+        raise HTTPException(status_code=400, detail="التأكيد مطلوب")
+    rec = await db.backup_files.find().sort("created_at", -1).limit(1).to_list(1)
+    if not rec:
+        raise HTTPException(status_code=404, detail="لا توجد نسخة احتياطية سحابية")
+    meta = rec[0]
+    try:
+        data_gz, _ = _get_object(meta["storage_path"])
+        raw = gzip.decompress(data_gz)
+        snapshot = json.loads(raw.decode("utf-8"))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"فشل قراءة النسخة: {e}")
+
+    # Safety: snapshot current data before wipe
+    safety_id = str(uuid.uuid4())
+    safety: Dict[str, Any] = {}
+    for c in BACKUP_COLLECTIONS:
+        docs = await db[c].find().to_list(100000)
+        safety[c] = [clean_doc(d) for d in docs]
+    await db.backup_snapshots.insert_one({
+        "id": safety_id, "data": safety, "created_at": now_iso(),
+        "reason": "pre_restore_latest", "source_backup_id": meta.get("id"),
+    })
+
+    # Skip restoring users so the admin session survives; also skip settings key
+    protected = {"users"}
+    restored: Dict[str, int] = {}
+    for c in BACKUP_COLLECTIONS:
+        if c in protected: continue
+        if c in snapshot and isinstance(snapshot[c], list):
+            await db[c].delete_many({})
+            if snapshot[c]:
+                # strip Mongo _id if any leaked
+                docs = [{k: v for k, v in d.items() if k != "_id"} for d in snapshot[c]]
+                await db[c].insert_many(docs)
+                restored[c] = len(docs)
+            else:
+                restored[c] = 0
+    await audit_log(user, "restore_latest_cloud", "system", meta.get("id", ""))
+    return {
+        "ok": True,
+        "source_backup_id": meta.get("id"),
+        "source_created_at": meta.get("created_at"),
+        "safety_snapshot_id": safety_id,
+        "restored": restored,
+        "total_docs": sum(restored.values()),
+    }
 
 @api.get("/backup/list")
 async def backup_list(user=Depends(require_perm("backup"))):
