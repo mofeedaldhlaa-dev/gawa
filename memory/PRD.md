@@ -16,25 +16,21 @@ file/media storage.
 - Scheduler: Emergent platform crons (`.emergent/crons.yml`)
 
 ## Implemented (recent)
-- Cloud backup daily + email download link (`/api/backup/*`, `/api/cron/daily-backup`)
+- Cloud backup daily + email download link
 - Login by email OR username (case-insensitive)
-- User email field in Users management
-- Enable/Disable accounts (users + customers) with 403 enforcement everywhere
-- Disabled account UX (portal banner + CS WhatsApp button + statement banner)
+- Enable/Disable accounts (users + customers) with 403 enforcement
+- Disabled account UX (portal banner + WhatsApp CS button + statement banner)
 - Admin management (role radio, hard delete with last-admin + self safety)
-- Send card to another phone from card-order screen
-  - `CardOrderRequest.recipient_phone` optional, stored on orders/sales/attempts
-  - Frontend: checkbox + tel input + Contact Picker API
-- SMS delivery for cards (free, client-side): `openSMS` in `lib/utils.js`; auto-opens on success; manual retry button
-- **2026-02: Recipient visibility everywhere**
-  - Printed sale invoice: highlighted "📤 المرسل إلى" row (`printSaleInvoice`)
-  - Printed public order receipt: same row (`printPublicOrder`)
-  - Admin Sales view dialog: amber highlighted row when `recipient_phone` present
-  - Customer portal previous-orders card: amber "📤 المرسل إلى" banner per order
-- **2026-02: Contact name under phone in card-order screen**
-  - Contact Picker returns tel + name; name is displayed below the phone in a green banner
-  - On result screen and toast, the name is preferred over the number when available
-  - Manual edits clear the name automatically
+- Send card to another phone from card-order screen (Contact Picker API)
+- Auto SMS delivery (client-side, `sms:` URI) + manual retry button
+- Recipient info visible everywhere: printed invoices, sale view dialog, previous-orders history, portal result screen
+- Contact name shown under phone in card-order screen
+- **2026-02: Remember Me in customer portal**
+  - Checkbox "حفظ رقم الهاتف وكلمة المرور" on `/order` login form
+  - Credentials stored in localStorage as `jwd_portal_saved` (base64-obfuscated JSON)
+  - Auto-load on mount when previously saved
+  - Explicit "مسح الحساب من هذا الجهاز" button to clear + reset form
+  - Un-checking the box on next login clears stored credentials automatically
 
 ## API cheatsheet
 - `POST /api/auth/login` — `{username|email, password}`

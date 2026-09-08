@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import api, { errText } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ const priceForCustomer = (cat, ctype) => {
 export default function PublicOrder() {
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
   const [customer, setCustomer] = useState(null);
   const [cats, setCats] = useState([]);
   const [category_id, setCategoryId] = useState("");
@@ -40,6 +41,38 @@ export default function PublicOrder() {
   const [loginError, setLoginError] = useState("");
   const [deviceMismatch, setDeviceMismatch] = useState(false);
   const [accountDisabled, setAccountDisabled] = useState(false);
+
+  // Load saved credentials on mount (if user opted in previously)
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("jwd_portal_saved");
+      if (raw) {
+        const decoded = JSON.parse(atob(raw));
+        if (decoded?.phone) {
+          setPhone(decoded.phone);
+          if (decoded.password) setPassword(decoded.password);
+          setRememberMe(true);
+        }
+      }
+    } catch { /* ignore corrupted storage */ }
+  }, []);
+
+  const saveCredentials = (p, pwd) => {
+    try {
+      const enc = btoa(JSON.stringify({ phone: p, password: pwd }));
+      localStorage.setItem("jwd_portal_saved", enc);
+    } catch { /* localStorage unavailable */ }
+  };
+  const clearSavedCredentials = () => {
+    try { localStorage.removeItem("jwd_portal_saved"); } catch {}
+  };
+  const forgetAccount = () => {
+    clearSavedCredentials();
+    setRememberMe(false);
+    setPhone("");
+    setPassword("");
+    toast.success("تم مسح بيانات الحساب المحفوظة من هذا الجهاز");
+  };
   // Previous orders section
   const [showHistory, setShowHistory] = useState(false);
   const [startDate, setStartDate] = useState("");
@@ -72,6 +105,8 @@ export default function PublicOrder() {
       setCustomer(r.data);
       const cr = await api.get("/public/card-order/categories");
       setCats(cr.data);
+      if (rememberMe) saveCredentials(phone, password);
+      else clearSavedCredentials();
       toast.success(`مرحباً ${r.data.name}`);
     } catch (err) {
       const status = err.response?.status;
@@ -224,6 +259,15 @@ export default function PublicOrder() {
           <form onSubmit={login} className="space-y-3" data-testid="po-login-form" noValidate>
             <div><Label>رقم الهاتف</Label><Input value={phone} onChange={(e) => { setPhone(e.target.value); setLoginError(""); }} data-testid="po-phone" autoComplete="tel" inputMode="tel"/></div>
             <div><Label>كلمة المرور</Label><Input type="password" value={password} onChange={(e) => { setPassword(e.target.value); setLoginError(""); }} data-testid="po-password" autoComplete="current-password"/></div>
+            <div className="flex items-center justify-between gap-2 pt-1">
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input type="checkbox" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} className="h-4 w-4" data-testid="po-remember"/>
+                <span>حفظ رقم الهاتف وكلمة المرور</span>
+              </label>
+              {(phone || password) && (
+                <button type="button" onClick={forgetAccount} className="text-xs text-red-600 hover:underline" data-testid="po-forget">مسح الحساب من هذا الجهاز</button>
+              )}
+            </div>
             {loginError && (
               <div className={`rounded-md border px-3 py-2 text-sm ${accountDisabled ? 'border-red-400 bg-red-100 text-red-800' : 'border-red-300 bg-red-50 text-red-700'}`} data-testid="po-login-error" role="alert">
                 <div className="flex items-start gap-2">
