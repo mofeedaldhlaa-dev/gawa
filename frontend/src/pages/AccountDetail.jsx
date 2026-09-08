@@ -66,20 +66,30 @@ export default function AccountDetail() {
 
   const saveVoucher = async () => {
     if (!voucher.amount || Number(voucher.amount) <= 0) { toast.error("أدخل مبلغاً صحيحاً"); return; }
-    if (type === "cash" || type === "expense") { toast.error("لا يمكن إنشاء سند مباشرة لهذا النوع"); return; }
+    if (type === "cash") { toast.error("لا يمكن إنشاء سند مباشرة للصندوق"); return; }
     try {
-      const payload = {
-        kind: voucher.kind,
-        party_type: type === "pos" ? "customer" : type,
-        party_id: id,
-        party_name: acc.name || "",
-        amount: Number(voucher.amount),
-        description: voucher.description,
-        date: voucher.date,
-        idempotency_key: genUUID(),
-      };
-      await api.post("/receipts", payload);
-      toast.success("تم حفظ السند وتحديث الأرصدة");
+      // Expense account: create an expense entry (money out of cashbox, into this expense account)
+      if (type === "expense") {
+        await api.post("/expenses", {
+          account_id: id,
+          amount: Number(voucher.amount),
+          description: voucher.description,
+          date: voucher.date,
+          idempotency_key: genUUID(),
+        });
+      } else {
+        await api.post("/receipts", {
+          kind: voucher.kind,
+          party_type: type === "pos" ? "customer" : type,
+          party_id: id,
+          party_name: acc.name || "",
+          amount: Number(voucher.amount),
+          description: voucher.description,
+          date: voucher.date,
+          idempotency_key: genUUID(),
+        });
+      }
+      toast.success("تم الحفظ وتحديث الأرصدة");
       setOpenVoucher(false);
       setVoucher({ ...voucher, amount: "", description: "" });
       load();
@@ -142,7 +152,7 @@ export default function AccountDetail() {
 
   if (!data) return <div className="p-8 text-center text-slate-500">جاري التحميل...</div>;
 
-  const canAddVoucher = type !== "cash" && type !== "expense";
+  const canAddVoucher = type !== "cash";  // customers, POS, suppliers, and expense accounts
   const canAddInvoice = type === "customer" || type === "pos" || type === "supplier";
   const canRequestPayment = type === "customer" || type === "pos" || type === "supplier";
 
@@ -177,7 +187,7 @@ export default function AccountDetail() {
       {/* Action buttons */}
       <Card className="p-3 flex flex-wrap gap-2 no-print" data-testid="acc-actions">
         {canAddVoucher && (
-          <Button onClick={() => setOpenVoucher(true)} className="bg-[#221340]" data-testid="btn-add-voucher"><Receipt size={14} className="ml-1"/> إضافة سند</Button>
+          <Button onClick={() => setOpenVoucher(true)} className="bg-[#221340]" data-testid="btn-add-voucher"><Receipt size={14} className="ml-1"/> {type === "expense" ? "إضافة مصروف" : "إضافة سند"}</Button>
         )}
         {canAddInvoice && (
           <Link to={type === "supplier" ? "/purchases/new" : `/sales/new?customer=${id}`}>
@@ -264,24 +274,33 @@ export default function AccountDetail() {
       {/* Voucher Dialog */}
       <Dialog open={openVoucher} onOpenChange={setOpenVoucher}>
         <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle>إضافة سند</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{type === "expense" ? "إضافة مصروف" : "إضافة سند"}</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <Label>نوع السند</Label>
-                <Select value={voucher.kind} onValueChange={(v) => setVoucher({ ...voucher, kind: v })}>
-                  <SelectTrigger data-testid="voucher-kind"><SelectValue/></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="receipt">قبض</SelectItem>
-                    <SelectItem value="payment">صرف</SelectItem>
-                  </SelectContent>
-                </Select>
+            {type === "expense" ? (
+              <div className="bg-red-50 border border-red-200 rounded p-2 text-xs text-red-800">
+                سيتم خصم المبلغ من الصندوق وإضافته إلى حساب المصروف: <span className="font-bold">{acc.name}</span>
               </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label>نوع السند</Label>
+                  <Select value={voucher.kind} onValueChange={(v) => setVoucher({ ...voucher, kind: v })}>
+                    <SelectTrigger data-testid="voucher-kind"><SelectValue/></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="receipt">قبض</SelectItem>
+                      <SelectItem value="payment">صرف</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div><Label>المبلغ</Label><Input type="number" value={voucher.amount} onChange={(e) => setVoucher({ ...voucher, amount: e.target.value })} data-testid="voucher-amount"/></div>
+              </div>
+            )}
+            {type === "expense" && (
               <div><Label>المبلغ</Label><Input type="number" value={voucher.amount} onChange={(e) => setVoucher({ ...voucher, amount: e.target.value })} data-testid="voucher-amount"/></div>
-            </div>
+            )}
             <div><Label>التاريخ</Label><Input type="date" value={voucher.date} onChange={(e) => setVoucher({ ...voucher, date: e.target.value })} data-testid="voucher-date"/></div>
             <div><Label>البيان</Label><Textarea value={voucher.description} onChange={(e) => setVoucher({ ...voucher, description: e.target.value })} data-testid="voucher-desc"/></div>
-            <Button onClick={saveVoucher} className="w-full bg-[#221340]" data-testid="voucher-save">حفظ السند</Button>
+            <Button onClick={saveVoucher} className="w-full bg-[#221340]" data-testid="voucher-save">{type === "expense" ? "حفظ المصروف" : "حفظ السند"}</Button>
           </div>
         </DialogContent>
       </Dialog>

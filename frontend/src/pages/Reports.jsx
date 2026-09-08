@@ -117,11 +117,11 @@ export default function Reports() {
       });
     } else if (tab === "card_order_log") {
       const labelP = { all: "الكل", day: "يومي", month: "شهري", year: "سنوي" }[olPeriod];
-      const labelS = { all: "الكل", success: "ناجح", rejected_over_limit: "مرفوض - تجاوز السقف", rejected_no_stock: "مرفوض - عدم توفر", rejected_no_customer: "غير موجود" }[olStatus] || "الكل";
+      const labelS = { all: "الكل", success: "ناجح", rejected_over_limit: "الفاشلة - تجاوز السقف", rejected_no_stock: "الفاشلة - عدم توفر", rejected_no_customer: "الفاشلة - محاولة دخول مرفوضة" }[olStatus] || "الكل";
       printReport({
         title: `${title} — الفترة: ${labelP} — الحالة: ${labelS}`,
         headers: ["التاريخ","العميل","الهاتف","الفئة","الكمية","القيمة","الحالة","السبب"],
-        rows: filtered.map((a) => [fmtDate(a.created_at), a.customer_name || "-", a.phone, a.category_name || "-", a.quantity || 0, fmt(a.total || 0), a.status==="success"?"ناجح":a.status==="rejected_over_limit"?"مرفوض - تجاوز السقف":a.status==="rejected_no_stock"?"مرفوض - عدم توفر":"مرفوض - غير موجود", a.reason || "-"]),
+        rows: filtered.map((a) => [fmtDate(a.created_at), a.customer_name || "-", a.phone, a.category_name || "-", a.quantity || 0, fmt(a.total || 0), a.status==="success"?"ناجح":a.status==="rejected_over_limit"?"الفاشلة - تجاوز السقف":a.status==="rejected_no_stock"?"الفاشلة - عدم توفر":"الفاشلة - دخول مرفوض", a.reason || "-"]),
         totals: [
           { label: "عدد الطلبات", value: orderLogSummary.total },
           { label: "الناجحة", value: orderLogSummary.success },
@@ -203,7 +203,7 @@ export default function Reports() {
               <div className="w-full sm:w-auto">
                 <label className="text-xs">الحالة</label>
                 <div className="flex flex-wrap gap-1 mt-1">
-                  {[["all","الكل"],["success","ناجح"],["rejected_over_limit","تجاوز السقف"],["rejected_no_stock","لا يوجد مخزون"],["rejected_no_customer","غير موجود"]].map(([k,l]) => (
+                  {[["all","الكل"],["success","ناجح"],["rejected_over_limit","الفاشلة - تجاوز السقف"],["rejected_no_stock","الفاشلة - لا يوجد مخزون"],["rejected_no_customer","الفاشلة - دخول مرفوض"]].map(([k,l]) => (
                     <button key={k} onClick={() => setOlStatus(k)} className={`px-2 py-1 rounded-full text-xs border ${olStatus===k?"bg-[#221340] text-white border-[#221340]":"border-slate-300"}`} data-testid={`ol-status-${k}`}>{l}</button>
                   ))}
                 </div>
@@ -289,7 +289,7 @@ const OrderLogTable = ({ data }) => (
         {data.map((a) => (
           <tr key={a.id} className="border-t">
             <td className="p-2">{fmtDate(a.created_at)}</td><td className="p-2">{a.customer_name || "-"}</td><td className="p-2">{a.phone}</td><td className="p-2">{a.category_name || "-"}</td><td className="p-2 num">{a.quantity || 0}</td><td className="p-2 num">{fmt(a.total || 0)}</td>
-            <td className="p-2"><span className={`text-xs px-2 py-0.5 rounded-full ${a.status==='success'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}`}>{a.status==='success'?'ناجح':a.status==='rejected_over_limit'?'مرفوض - تجاوز السقف':a.status==='rejected_no_stock'?'مرفوض - عدم توفر':'مرفوض - غير موجود'}</span></td>
+            <td className="p-2"><span className={`text-xs px-2 py-0.5 rounded-full ${a.status==='success'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}`}>{a.status==='success'?'ناجح':a.status==='rejected_over_limit'?'الفاشلة - تجاوز السقف':a.status==='rejected_no_stock'?'الفاشلة - عدم توفر':'الفاشلة - دخول مرفوض'}</span></td>
             <td className="p-2 text-xs">{a.reason}</td>
           </tr>
         ))}
