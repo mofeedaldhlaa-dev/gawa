@@ -35,6 +35,7 @@ export default function PublicOrder() {
   const [selectedCat, setSelectedCat] = useState(null);
   const [loginError, setLoginError] = useState("");
   const [deviceMismatch, setDeviceMismatch] = useState(false);
+  const [accountDisabled, setAccountDisabled] = useState(false);
   // Previous orders section
   const [showHistory, setShowHistory] = useState(false);
   const [startDate, setStartDate] = useState("");
@@ -49,9 +50,16 @@ export default function PublicOrder() {
     toast.success("تم إرسال طلبك إلى خدمة العملاء، وسيتم التواصل معك لإكمال عملية ربط الهاتف.");
   };
 
+  const contactCSForDisabledAccount = () => {
+    const now = new Date();
+    const msg = `استفسار عن حساب موقوف\n\nرقم الهاتف / الحساب: ${phone}\nالتاريخ والوقت: ${now.toLocaleString("en-GB")}\n\nحسابي موقوف حالياً ولا أستطيع تسجيل الدخول.\nيرجى التواصل معي لمعرفة السبب وإعادة تفعيل الحساب.`;
+    openWhatsApp(ADMIN_WHATSAPP, msg);
+    toast.success("تم إرسال طلبك إلى خدمة العملاء.");
+  };
+
   const login = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
-    setLoginError(""); setDeviceMismatch(false);
+    setLoginError(""); setDeviceMismatch(false); setAccountDisabled(false);
     if (!phone || !password) { setLoginError("أدخل رقم الهاتف وكلمة المرور"); return; }
     setLoading(true);
     try {
@@ -69,8 +77,8 @@ export default function PublicOrder() {
       else if (status === 404) { setLoginError("رقم الهاتف أو كلمة المرور غير صحيحة"); }
       else if (status === 403) {
         setLoginError(msg || "الحساب معطل");
-        // Detect device-mismatch (backend returns a message that starts with "الهاتف غير مرتبط")
         if ((msg || "").startsWith("الهاتف غير مرتبط")) setDeviceMismatch(true);
+        else if ((msg || "").includes("معطل") || (msg || "").includes("موقوف")) setAccountDisabled(true);
       }
       else if (!err.response) { setLoginError("تعذر الاتصال بالخادم. تحقق من الإنترنت وحاول مجدداً."); }
       else { setLoginError(msg || "حدث خطأ"); }
@@ -148,9 +156,19 @@ export default function PublicOrder() {
             <div><Label>رقم الهاتف</Label><Input value={phone} onChange={(e) => { setPhone(e.target.value); setLoginError(""); }} data-testid="po-phone" autoComplete="tel" inputMode="tel"/></div>
             <div><Label>كلمة المرور</Label><Input type="password" value={password} onChange={(e) => { setPassword(e.target.value); setLoginError(""); }} data-testid="po-password" autoComplete="current-password"/></div>
             {loginError && (
-              <div className="rounded-md border border-red-300 bg-red-50 text-red-700 px-3 py-2 text-sm" data-testid="po-login-error" role="alert">
+              <div className={`rounded-md border px-3 py-2 text-sm ${accountDisabled ? 'border-red-400 bg-red-100 text-red-800' : 'border-red-300 bg-red-50 text-red-700'}`} data-testid="po-login-error" role="alert">
                 <div className="flex items-start gap-2">
-                  <AlertCircle size={16} className="mt-0.5 shrink-0"/><span>{loginError}</span>
+                  {accountDisabled ? <Ban size={18} className="mt-0.5 shrink-0"/> : <AlertCircle size={16} className="mt-0.5 shrink-0"/>}
+                  <div className="flex-1">
+                    {accountDisabled ? (
+                      <>
+                        <div className="font-bold text-base mb-1">⛔ الحساب موقوف</div>
+                        <div>حسابك موقوف حالياً. تواصل مع خدمة العملاء لإعادة تفعيل حسابك.</div>
+                      </>
+                    ) : (
+                      <span>{loginError}</span>
+                    )}
+                  </div>
                 </div>
                 {deviceMismatch && (
                   <Button
@@ -160,6 +178,16 @@ export default function PublicOrder() {
                     data-testid="po-contact-cs-device"
                   >
                     <Phone size={14} className="ml-1"/> إرسال لخدمة العملاء
+                  </Button>
+                )}
+                {accountDisabled && (
+                  <Button
+                    type="button"
+                    onClick={contactCSForDisabledAccount}
+                    className="mt-3 w-full bg-green-600 hover:bg-green-700 text-white"
+                    data-testid="po-contact-cs-disabled"
+                  >
+                    <Phone size={14} className="ml-1"/> تواصل مع خدمة العملاء
                   </Button>
                 )}
               </div>

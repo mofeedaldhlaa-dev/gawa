@@ -524,6 +524,24 @@ async def disable_user(uid: str, user=Depends(require_perm("users"))):
     await audit_log(user, "disable", "user", uid)
     return {"ok": True}
 
+@api.delete("/users/{uid}/permanent")
+async def hard_delete_user(uid: str, user=Depends(require_perm("users"))):
+    if uid == user["id"]:
+        raise HTTPException(status_code=400, detail="لا يمكن حذف حسابك")
+    target = await db.users.find_one({"id": uid})
+    if not target:
+        raise HTTPException(status_code=404, detail="المستخدم غير موجود")
+    # Safety: don't leave the system without an active admin
+    if target.get("role") == "admin":
+        other_admins = await db.users.count_documents({
+            "role": "admin", "status": "active", "id": {"$ne": uid}
+        })
+        if other_admins == 0:
+            raise HTTPException(status_code=400, detail="لا يمكن حذف آخر مدير نشط. أنشئ حساب مدير آخر أولاً.")
+    await db.users.delete_one({"id": uid})
+    await audit_log(user, "hard_delete", "user", uid, {"username": target.get("username"), "role": target.get("role")})
+    return {"ok": True}
+
 @api.post("/users/{uid}/toggle-status")
 async def toggle_user_status(uid: str, user=Depends(require_perm("users"))):
     if uid == user["id"]:

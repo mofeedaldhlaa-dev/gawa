@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { fmtDate } from "@/lib/utils";
-import { Plus, Edit, Power, PowerOff } from "lucide-react";
+import { Plus, Edit, Power, PowerOff, Trash2, ShieldCheck } from "lucide-react";
 
 const PERMS_LABELS = {
   dashboard: "لوحة التحكم", sales: "المبيعات", purchases: "المشتريات", customers: "العملاء",
@@ -46,10 +46,25 @@ function UserForm({ initial, allPerms, onSaved, onClose }) {
         <div><Label>اسم المستخدم</Label><Input value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} required data-testid="usr-username"/></div>
       </div>
       <div><Label>البريد الإلكتروني <span className="text-xs text-slate-400">(يُستخدم لتسجيل الدخول واستقبال النسخ الاحتياطية)</span></Label><Input type="email" value={f.email || ""} onChange={(e) => setF({ ...f, email: e.target.value })} placeholder="user@example.com" autoComplete="email" data-testid="usr-email"/></div>
+      <div>
+        <Label>الدور</Label>
+        <div className="flex gap-2 mt-1">
+          <label className={`flex-1 flex items-center gap-2 border rounded p-2 cursor-pointer ${f.role==='user' ? 'border-slate-300 bg-slate-50' : 'border-slate-200'}`}>
+            <input type="radio" name="role" value="user" checked={f.role==='user'} onChange={() => setF({ ...f, role: 'user' })} data-testid="usr-role-user"/>
+            <span className="text-sm">مستخدم عادي</span>
+          </label>
+          <label className={`flex-1 flex items-center gap-2 border rounded p-2 cursor-pointer ${f.role==='admin' ? 'border-red-400 bg-red-50' : 'border-slate-200'}`}>
+            <input type="radio" name="role" value="admin" checked={f.role==='admin'} onChange={() => setF({ ...f, role: 'admin', permissions: [] })} data-testid="usr-role-admin"/>
+            <ShieldCheck size={14} className="text-red-600"/>
+            <span className="text-sm font-bold">مدير نظام</span>
+          </label>
+        </div>
+        {f.role === 'admin' && <div className="text-[11px] text-red-600 mt-1">تحذير: المدير يملك كل الصلاحيات ولا يحتاج قائمة صلاحيات.</div>}
+      </div>
       <div><Label>كلمة المرور {initial?.id && "(اتركها فارغة لعدم التغيير)"}</Label><Input type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} required={!initial?.id} data-testid="usr-password"/></div>
       <div>
-        <Label>الصلاحيات</Label>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2 max-h-52 overflow-y-auto p-2 bg-slate-50 rounded">
+        <Label>الصلاحيات {f.role === 'admin' && <span className="text-xs text-slate-400">(لا حاجة لها للمدير)</span>}</Label>
+        <div className={`grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2 max-h-52 overflow-y-auto p-2 bg-slate-50 rounded ${f.role === 'admin' ? 'opacity-40 pointer-events-none' : ''}`}>
           {allPerms.map((p) => (
             <label key={p} className="flex items-center gap-2 text-sm">
               <Checkbox checked={f.permissions.includes(p)} onCheckedChange={() => toggle(p)} data-testid={`perm-${p}`}/>
@@ -79,6 +94,17 @@ export default function UsersPage() {
       load();
     } catch (e) { toast.error(errText(e)); }
   };
+
+  const hardDelete = async (u) => {
+    if (!window.confirm(`⚠️ حذف نهائي لحساب "${u.name}"؟\nلن يمكن استرجاعه. تأكيد؟`)) return;
+    const confirmText = window.prompt(`لتأكيد الحذف النهائي، اكتب اسم المستخدم:\n${u.username}`);
+    if (confirmText !== u.username) { toast.error("تم إلغاء الحذف — الاسم غير مطابق."); return; }
+    try {
+      await api.delete(`/users/${u.id}/permanent`);
+      toast.success("تم حذف الحساب نهائياً");
+      load();
+    } catch (e) { toast.error(errText(e)); }
+  };
   return (
     <div className="space-y-4" data-testid="users-page">
       <div className="flex justify-end">
@@ -94,7 +120,7 @@ export default function UsersPage() {
           <thead className="bg-slate-50"><tr className="text-right"><th className="p-3">الاسم</th><th className="p-3">المستخدم</th><th className="p-3">البريد</th><th className="p-3">الدور</th><th className="p-3">الحالة</th><th className="p-3">آخر دخول</th><th></th></tr></thead>
           <tbody>
             {items.map((u) => (
-              <tr key={u.id} className="border-t"><td className="p-3">{u.name}</td><td className="p-3 font-mono">{u.username}</td><td className="p-3 text-xs text-slate-600 font-mono">{u.email || "—"}</td><td className="p-3">{u.role==='admin'?'مدير':'مستخدم'}</td><td className="p-3"><span className={`text-xs px-2 py-0.5 rounded-full ${u.status==='active'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}`}>{u.status==='active'?'نشط':'معطل'}</span></td><td className="p-3">{fmtDate(u.last_login)}</td><td className="p-3"><div className="flex gap-1"><Button size="sm" variant="outline" onClick={() => toggleStatus(u)} data-testid={`usr-toggle-${u.id}`} title={u.status==='active'?'تعطيل':'تفعيل'}>{u.status==='active' ? <PowerOff size={14} className="text-red-600"/> : <Power size={14} className="text-green-600"/>}</Button><Button size="sm" variant="outline" onClick={() => { setEdit(u); setOpen(true); }}><Edit size={14}/></Button></div></td></tr>
+              <tr key={u.id} className="border-t"><td className="p-3">{u.name}</td><td className="p-3 font-mono">{u.username}</td><td className="p-3 text-xs text-slate-600 font-mono">{u.email || "—"}</td><td className="p-3">{u.role==='admin'?<span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold">مدير</span>:'مستخدم'}</td><td className="p-3"><span className={`text-xs px-2 py-0.5 rounded-full ${u.status==='active'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}`}>{u.status==='active'?'نشط':'معطل'}</span></td><td className="p-3">{fmtDate(u.last_login)}</td><td className="p-3"><div className="flex gap-1"><Button size="sm" variant="outline" onClick={() => toggleStatus(u)} data-testid={`usr-toggle-${u.id}`} title={u.status==='active'?'تعطيل':'تفعيل'}>{u.status==='active' ? <PowerOff size={14} className="text-red-600"/> : <Power size={14} className="text-green-600"/>}</Button><Button size="sm" variant="outline" onClick={() => { setEdit(u); setOpen(true); }} title="تعديل"><Edit size={14}/></Button><Button size="sm" variant="outline" onClick={() => hardDelete(u)} data-testid={`usr-delete-${u.id}`} title="حذف نهائي" className="border-red-300 hover:bg-red-50"><Trash2 size={14} className="text-red-600"/></Button></div></td></tr>
             ))}
           </tbody>
         </table>
@@ -115,6 +141,7 @@ export default function UsersPage() {
                   {u.status==='active' ? <PowerOff size={14} className="text-red-600"/> : <Power size={14} className="text-green-600"/>}
                 </Button>
                 <Button size="sm" variant="outline" onClick={() => { setEdit(u); setOpen(true); }}><Edit size={14}/></Button>
+                <Button size="sm" variant="outline" onClick={() => hardDelete(u)} data-testid={`usr-delete-m-${u.id}`} className="border-red-300"><Trash2 size={14} className="text-red-600"/></Button>
               </div>
             </div>
           </Card>
