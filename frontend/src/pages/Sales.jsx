@@ -1,15 +1,27 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import api, { errText } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Link } from "react-router-dom";
 import { fmt, fmtDate, openWhatsApp, buildInvoiceMessage } from "@/lib/utils";
-import { printSaleInvoice } from "@/lib/print";
+import { printSaleInvoice, printReport } from "@/lib/print";
 import { useAuth } from "@/lib/auth";
-import { Plus, Search, Printer, MessageCircle, Eye, Edit } from "lucide-react";
+import { Plus, Search, Printer, MessageCircle, Eye, Edit, Filter } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
+
+const SALE_TYPE_LABEL = {
+  all: "الكل",
+  credit: "آجل",
+  cash: "نقدي",
+  electronic: "إلكترونية",
+};
+
+const iso = (d) => d.toISOString().slice(0, 10);
+const startOfToday = () => { const d = new Date(); d.setHours(0,0,0,0); return d; };
+const startOfMonth = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); };
+const startOfYear = () => { const d = new Date(); return new Date(d.getFullYear(), 0, 1); };
 
 export default function Sales() {
   const { user } = useAuth();
@@ -19,6 +31,11 @@ export default function Sales() {
   const [viewing, setViewing] = useState(null);
   const [settings, setSettings] = useState({ company_name: "شبكة جواد نت اللاسلكية" });
 
+  const [period, setPeriod] = useState("month"); // day | month | year | custom
+  const [start, setStart] = useState(iso(startOfMonth()));
+  const [end, setEnd] = useState(iso(new Date()));
+  const [type, setType] = useState("all"); // all | credit | cash | electronic
+
   const load = () => api.get("/sales", { params: { q } }).then((r) => setItems(r.data));
   useEffect(() => {
     load();
@@ -26,9 +43,66 @@ export default function Sales() {
     api.get("/settings").then((r) => setSettings(r.data));
   }, [q]);
 
+  const applyPreset = (p) => {
+    setPeriod(p);
+    const today = new Date();
+    if (p === "day") { setStart(iso(startOfToday())); setEnd(iso(today)); }
+    else if (p === "month") { setStart(iso(startOfMonth())); setEnd(iso(today)); }
+    else if (p === "year") { setStart(iso(startOfYear())); setEnd(iso(today)); }
+  };
+
+  const filtered = useMemo(() => {
+    const s = start ? new Date(start + "T00:00:00") : null;
+    const e = end ? new Date(end + "T23:59:59") : null;
+    return items.filter((it) => {
+      const dt = new Date(it.created_at);
+      if (s && dt < s) return false;
+      if (e && dt > e) return false;
+      if (type === "credit" && it.sale_type !== "credit") return false;
+      if (type === "cash" && it.sale_type !== "cash") return false;
+      if (type === "electronic" && it.source !== "public_order") return false;
+      return true;
+    });
+  }, [items, start, end, type]);
+
+  const totals = useMemo(() => {
+    const t = filtered.reduce((a, s) => {
+      a.count += 1; a.total += (s.total || 0); a.paid += (s.paid || 0); a.remaining += (s.remaining || 0);
+      return a;
+    }, { count: 0, total: 0, paid: 0, remaining: 0 });
+    return t;
+  }, [filtered]);
+
   const doPrint = (s) => {
     const customer = customers.find((c) => c.id === s.customer_id);
     printSaleInvoice({ sale: s, customer, username: user?.name || user?.username });
+  };
+
+  const printFilteredReport = () => {
+    if (filtered.length === 0) { toast.error("لا توجد فواتير ضمن الفلترة الحالية"); return; }
+    const periodLabel = { day: "يومي", month: "شهري", year: "سنوي", custom: "مخصص" }[period];
+    const title = `تقرير المبيعات ${periodLabel} (${SALE_TYPE_LABEL[type]}) — من ${start || "البداية"} إلى ${end || "اليوم"}`;
+    const rows = filtered.map((s) => [
+      s.number,
+      fmtDate(s.created_at),
+      s.customer_name || "نقدي",
+      s.source === "public_order" ? "إلكترونية" : (s.sale_type === "cash" ? "نقدي" : "آجل"),
+      fmt(s.total),
+      fmt(s.paid),
+      fmt(s.remaining),
+    ]);
+    printReport({
+      title,
+      headers: ["الرقم", "التاريخ", "العميل", "النوع", "الإجمالي", "المدفوع", "المتبقي"],
+      rows,
+      totals: [
+        { label: "عدد الفواتير", value: totals.count },
+        { label: "إجمالي المبيعات", value: fmt(totals.total) },
+        { label: "إجمالي المدفوع", value: fmt(totals.paid) },
+        { label: "إجمالي المتبقي", value: fmt(totals.remaining) },
+      ],
+      username: user?.name || user?.username,
+    });
   };
 
   const sendWA = (s) => {
@@ -43,21 +117,58 @@ export default function Sales() {
     openWhatsApp(cust.phone, msg);
   };
 
+  const saleTypeLabelOf = (s) => s.source === "public_order" ? "إلكترونية" : (s.sale_type === "cash" ? "نقدي" : "آجل");
+  const saleTypeClass = (s) => {
+    if (s.source === "public_order") return "bg-purple-100 text-purple-700";
+    if (s.sale_type === "cash") return "bg-emerald-100 text-emerald-700";
+    return "bg-amber-100 text-amber-700";
+  };
+
   return (
     <div className="space-y-4" data-testid="sales-page">
       <div className="flex justify-between flex-wrap gap-2 no-print">
         <div className="relative w-full sm:max-w-xs flex-1"><Search className="absolute right-3 top-2.5 text-slate-400" size={18}/><Input placeholder="بحث برقم GWD..." value={q} onChange={(e) => setQ(e.target.value)} className="pr-10" /></div>
-        <Link to="/sales/new" className="w-full sm:w-auto"><Button className="bg-[#221340] w-full sm:w-auto" data-testid="new-sale-btn"><Plus size={16} className="ml-1"/> فاتورة جديدة</Button></Link>
+        <div className="flex gap-2 flex-wrap">
+          <Button onClick={printFilteredReport} variant="outline" className="border-[#452480] text-[#452480]" data-testid="sales-print-report"><Printer size={16} className="ml-1"/> طباعة التقرير</Button>
+          <Link to="/sales/new"><Button className="bg-[#221340]" data-testid="new-sale-btn"><Plus size={16} className="ml-1"/> فاتورة جديدة</Button></Link>
+        </div>
       </div>
+
+      <Card className="p-3 no-print" data-testid="sales-filters">
+        <div className="flex items-center gap-2 mb-3 text-sm text-slate-600"><Filter size={14}/> فلترة</div>
+        <div className="flex flex-wrap gap-2 mb-3">
+          {[["day","يومي"],["month","شهري"],["year","سنوي"],["custom","مخصص"]].map(([k,l]) => (
+            <button key={k} type="button" onClick={() => applyPreset(k)} className={`px-3 py-1.5 rounded-full text-xs border transition ${period===k ? "bg-[#452480] text-white border-[#452480]" : "border-slate-300 hover:bg-slate-50"}`} data-testid={`sales-period-${k}`}>{l}</button>
+          ))}
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+          <div><label className="text-xs text-slate-500">من تاريخ</label><Input type="date" value={start} onChange={(e) => { setStart(e.target.value); setPeriod("custom"); }} data-testid="sales-start"/></div>
+          <div><label className="text-xs text-slate-500">إلى تاريخ</label><Input type="date" value={end} onChange={(e) => { setEnd(e.target.value); setPeriod("custom"); }} data-testid="sales-end"/></div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {["all","credit","cash","electronic"].map((k) => (
+            <button key={k} type="button" onClick={() => setType(k)} className={`px-3 py-1.5 rounded-full text-xs border transition ${type===k ? "bg-[#221340] text-white border-[#221340]" : "border-slate-300 hover:bg-slate-50"}`} data-testid={`sales-type-${k}`}>{SALE_TYPE_LABEL[k]}</button>
+          ))}
+        </div>
+      </Card>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 no-print" data-testid="sales-summary">
+        <Card className="p-3"><div className="text-xs text-slate-500">عدد الفواتير</div><div className="text-xl font-bold">{totals.count}</div></Card>
+        <Card className="p-3"><div className="text-xs text-slate-500">الإجمالي</div><div className="text-xl font-bold num text-[#452480]">{fmt(totals.total)}</div></Card>
+        <Card className="p-3"><div className="text-xs text-slate-500">المدفوع</div><div className="text-xl font-bold num text-emerald-700">{fmt(totals.paid)}</div></Card>
+        <Card className="p-3"><div className="text-xs text-slate-500">المتبقي</div><div className="text-xl font-bold num text-amber-700">{fmt(totals.remaining)}</div></Card>
+      </div>
+
       <Card className="overflow-x-auto hidden md:block">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50"><tr className="text-right"><th className="p-3">الرقم</th><th className="p-3">التاريخ</th><th className="p-3">العميل</th><th className="p-3">الإجمالي</th><th className="p-3">المدفوع</th><th className="p-3">المتبقي</th><th className="p-3 no-print"></th></tr></thead>
+          <thead className="bg-slate-50"><tr className="text-right"><th className="p-3">الرقم</th><th className="p-3">التاريخ</th><th className="p-3">العميل</th><th className="p-3">النوع</th><th className="p-3">الإجمالي</th><th className="p-3">المدفوع</th><th className="p-3">المتبقي</th><th className="p-3 no-print"></th></tr></thead>
           <tbody>
-            {items.map((s) => (
+            {filtered.map((s) => (
               <tr key={s.id} className="border-t border-slate-100">
                 <td className="p-3 font-mono text-[#452480] font-bold">{s.number}</td>
                 <td className="p-3">{fmtDate(s.created_at)}</td>
                 <td className="p-3">{s.customer_name || "نقدي"}</td>
+                <td className="p-3"><span className={`text-xs px-2 py-0.5 rounded-full ${saleTypeClass(s)}`} data-testid={`sale-type-${s.id}`}>{saleTypeLabelOf(s)}</span></td>
                 <td className="p-3 num">{fmt(s.total)}</td>
                 <td className="p-3 num">{fmt(s.paid)}</td>
                 <td className="p-3 num font-bold text-amber-700">{fmt(s.remaining)}</td>
@@ -69,17 +180,19 @@ export default function Sales() {
                 </td>
               </tr>
             ))}
-            {items.length === 0 && <tr><td colSpan={7} className="p-6 text-center text-slate-400">لا توجد فواتير</td></tr>}
+            {filtered.length === 0 && <tr><td colSpan={8} className="p-6 text-center text-slate-400">لا توجد فواتير ضمن الفلترة الحالية</td></tr>}
           </tbody>
         </table>
       </Card>
+
       <div className="md:hidden space-y-2 no-print">
-        {items.map((s) => (
+        {filtered.map((s) => (
           <Card key={s.id} className="p-3">
             <div className="flex justify-between items-start gap-2">
               <div className="min-w-0">
                 <div className="font-mono font-bold text-[#452480] truncate">{s.number}</div>
                 <div className="text-xs text-slate-500 truncate">{s.customer_name || "نقدي"} • {fmtDate(s.created_at)}</div>
+                <span className={`text-[10px] px-2 py-0.5 rounded-full mt-1 inline-block ${saleTypeClass(s)}`}>{saleTypeLabelOf(s)}</span>
               </div>
               <div className="text-left text-xs shrink-0">
                 <div>الإجمالي: <span className="num font-bold">{fmt(s.total)}</span></div>
@@ -94,7 +207,7 @@ export default function Sales() {
             </div>
           </Card>
         ))}
-        {items.length === 0 && <div className="text-center text-slate-400 p-6">لا توجد فواتير</div>}
+        {filtered.length === 0 && <div className="text-center text-slate-400 p-6">لا توجد فواتير ضمن الفلترة الحالية</div>}
       </div>
 
       <Dialog open={!!viewing} onOpenChange={(o) => !o && setViewing(null)}>
@@ -104,6 +217,7 @@ export default function Sales() {
             <div className="space-y-2 text-sm">
               <div className="flex justify-between"><span>التاريخ</span><span>{fmtDate(viewing.created_at)}</span></div>
               <div className="flex justify-between"><span>العميل</span><span>{viewing.customer_name || "نقدي"}</span></div>
+              <div className="flex justify-between"><span>النوع</span><span className={`text-xs px-2 py-0.5 rounded-full ${saleTypeClass(viewing)}`}>{saleTypeLabelOf(viewing)}</span></div>
               {viewing.recipient_phone && (
                 <div className="flex justify-between bg-amber-50 border border-amber-200 rounded px-2 py-1" data-testid="sale-view-recipient">
                   <span className="text-amber-800">📤 المرسل إلى</span>
