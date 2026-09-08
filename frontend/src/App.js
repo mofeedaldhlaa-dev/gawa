@@ -26,6 +26,7 @@ import Receipts from "@/pages/Receipts";
 import Expenses from "@/pages/Expenses";
 import Orders from "@/pages/Orders";
 import Reports from "@/pages/Reports";
+import Accounts from "@/pages/Accounts";
 import UsersPage from "@/pages/Users";
 import Notifications from "@/pages/Notifications";
 import AuditLog from "@/pages/AuditLog";
@@ -68,6 +69,7 @@ const menu = [
   { path: "/stock", label: "المخزون", icon: Boxes, perm: "stock" },
   { path: "/receipts", label: "السندات", icon: Receipt, perm: "receipts" },
   { path: "/expenses", label: "المصروفات", icon: Wallet, perm: "expenses" },
+  { path: "/accounts", label: "الحسابات", icon: Wallet, perm: "receipts" },
   { path: "/orders", label: "طلبات الكروت", icon: Ticket, perm: "card_orders" },
   { path: "/reports", label: "التقارير", icon: BarChart3, perm: "reports" },
   { path: "/users", label: "المستخدمون", icon: UserCog, perm: "users" },
@@ -224,6 +226,7 @@ function AppRoutes() {
       <Route path="/stock" element={<Guard perm="stock"><Stock /></Guard>} />
       <Route path="/receipts" element={<Guard perm="receipts"><Receipts /></Guard>} />
       <Route path="/expenses" element={<Guard perm="expenses"><Expenses /></Guard>} />
+      <Route path="/accounts" element={<Guard perm="receipts"><Accounts /></Guard>} />
       <Route path="/orders" element={<Guard perm="card_orders"><Orders /></Guard>} />
       <Route path="/reports" element={<Guard perm="reports"><Reports /></Guard>} />
       <Route path="/users" element={<Guard perm="users"><UsersPage /></Guard>} />

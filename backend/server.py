@@ -427,6 +427,19 @@ class ExpenseIn(BaseModel):
     date: Optional[str] = None  # YYYY-MM-DD; defaults to today
     idempotency_key: Optional[str] = None
 
+class TransferIn(BaseModel):
+    source_type: str  # customer / supplier / cash
+    source_id: Optional[str] = None
+    source_name: Optional[str] = ""
+    dest_type: str    # customer / supplier / cash
+    dest_id: Optional[str] = None
+    dest_name: Optional[str] = ""
+    amount: float
+    description: Optional[str] = ""
+    block_negative: bool = False
+    date: Optional[str] = None
+    idempotency_key: Optional[str] = None
+
 class CardOrderPublicLogin(BaseModel):
     phone: str
     password: str
@@ -1650,11 +1663,8 @@ async def cash_summary(
     user=Depends(get_current_user),
 ):
     """Compute cash box totals from all sources:
-    IN  = cash sales (sale_type=cash) + receipt vouchers (kind=receipt)
-    OUT = payment vouchers (kind=payment) + expenses
-    Optional YYYY-MM-DD range; returns totals and net = IN - OUT.
-    A separate `balance` field returns the ALL-TIME running balance regardless
-    of the filter, so the dashboard always shows the true cash position."""
+    IN  = cash sales + receipt vouchers + transfers TO cash
+    OUT = payment vouchers + expenses + transfers FROM cash"""
     s_iso = f"{start}T00:00:00+00:00" if start else None
     e_iso = f"{end}T23:59:59+00:00" if end else None
 
@@ -1666,15 +1676,22 @@ async def cash_summary(
     sales = await db.sales.find({"status": "active", "sale_type": "cash"}).to_list(20000)
     recs = await db.receipts.find({"status": "active"}).to_list(20000)
     exps = await db.expenses.find({"status": "active"}).to_list(20000)
+    trs = await db.transfers.find({"status": "active"}).to_list(20000)
 
-    total_in_all = sum(s.get("total", 0) for s in sales) + sum(r.get("amount", 0) for r in recs if r.get("kind") == "receipt")
-    total_out_all = sum(r.get("amount", 0) for r in recs if r.get("kind") == "payment") + sum(e.get("amount", 0) for e in exps)
+    total_in_all = sum(s.get("total", 0) for s in sales) \
+        + sum(r.get("amount", 0) for r in recs if r.get("kind") == "receipt") \
+        + sum(t.get("amount", 0) for t in trs if t.get("dest_type") == "cash")
+    total_out_all = sum(r.get("amount", 0) for r in recs if r.get("kind") == "payment") \
+        + sum(e.get("amount", 0) for e in exps) \
+        + sum(t.get("amount", 0) for t in trs if t.get("source_type") == "cash")
     running_balance = total_in_all - total_out_all
 
     filt_in = sum(s.get("total", 0) for s in sales if in_range(s.get("created_at", ""))) \
-              + sum(r.get("amount", 0) for r in recs if r.get("kind") == "receipt" and in_range(r.get("created_at", "")))
+              + sum(r.get("amount", 0) for r in recs if r.get("kind") == "receipt" and in_range(r.get("created_at", ""))) \
+              + sum(t.get("amount", 0) for t in trs if t.get("dest_type") == "cash" and in_range(t.get("created_at", "")))
     filt_out = sum(r.get("amount", 0) for r in recs if r.get("kind") == "payment" and in_range(r.get("created_at", ""))) \
-               + sum(e.get("amount", 0) for e in exps if in_range(e.get("created_at", "")))
+               + sum(e.get("amount", 0) for e in exps if in_range(e.get("created_at", ""))) \
+               + sum(t.get("amount", 0) for t in trs if t.get("source_type") == "cash" and in_range(t.get("created_at", "")))
 
     return {
         "range": {"start": start, "end": end},
@@ -1687,6 +1704,8 @@ async def cash_summary(
             "receipts": sum(1 for r in recs if r.get("kind") == "receipt" and in_range(r.get("created_at", ""))),
             "payments": sum(1 for r in recs if r.get("kind") == "payment" and in_range(r.get("created_at", ""))),
             "expenses": sum(1 for e in exps if in_range(e.get("created_at", ""))),
+            "transfers_in": sum(1 for t in trs if t.get("dest_type") == "cash" and in_range(t.get("created_at", ""))),
+            "transfers_out": sum(1 for t in trs if t.get("source_type") == "cash" and in_range(t.get("created_at", ""))),
         },
     }
 
@@ -1708,6 +1727,7 @@ async def cash_statement(
     sales = await db.sales.find(q({"status": "active", "sale_type": "cash"})).to_list(5000)
     recs = await db.receipts.find(q({"status": "active"})).to_list(5000)
     exps = await db.expenses.find(q({"status": "active"})).to_list(5000)
+    trs = await db.transfers.find(q({"status": "active"})).to_list(5000)
     entries = []
     for s in sales:
         entries.append({"created_at": s["created_at"], "type": "cash_sale", "number": s.get("number"),
@@ -1726,6 +1746,15 @@ async def cash_statement(
         entries.append({"created_at": e["created_at"], "type": "expense", "number": e.get("number"),
                         "description": f"مصروف — {e.get('account_name','')}" + (f" — {e.get('description')}" if e.get("description") else ""),
                         "in": 0, "out": e.get("amount", 0)})
+    for t in trs:
+        if t.get("dest_type") == "cash":
+            entries.append({"created_at": t["created_at"], "type": "transfer_in", "number": t.get("number"),
+                            "description": f"تحويل من {t.get('source_name','')}" + (f" — {t.get('description')}" if t.get("description") else ""),
+                            "in": t.get("amount", 0), "out": 0})
+        elif t.get("source_type") == "cash":
+            entries.append({"created_at": t["created_at"], "type": "transfer_out", "number": t.get("number"),
+                            "description": f"تحويل إلى {t.get('dest_name','')}" + (f" — {t.get('description')}" if t.get("description") else ""),
+                            "in": 0, "out": t.get("amount", 0)})
     entries.sort(key=lambda x: x["created_at"])
     running = 0.0
     for e in entries:
@@ -1733,6 +1762,222 @@ async def cash_statement(
         e["balance"] = running
     return {"range": {"start": start, "end": end}, "entries": entries,
             "total_in": sum(e["in"] for e in entries), "total_out": sum(e["out"] for e in entries)}
+
+
+# ================= TRANSFERS =================
+@api.post("/transfers")
+async def create_transfer(data: TransferIn, user=Depends(require_perm("receipts"))):
+    if data.amount is None or data.amount <= 0:
+        raise HTTPException(status_code=400, detail="المبلغ غير صالح")
+    allowed = ("customer", "supplier", "cash")
+    if data.source_type not in allowed or data.dest_type not in allowed:
+        raise HTTPException(status_code=400, detail="نوع الحساب غير مدعوم")
+    if data.source_type == data.dest_type and (data.source_id or "") == (data.dest_id or ""):
+        raise HTTPException(status_code=400, detail="لا يمكن التحويل لنفس الحساب")
+    if data.idempotency_key:
+        existing = await db.transfers.find_one({"idempotency_key": data.idempotency_key})
+        if existing: return clean_doc(existing)
+
+    # Validate parties + fetch names
+    source_name = data.source_name or ""
+    dest_name = data.dest_name or ""
+    if data.source_type in ("customer", "supplier"):
+        col = db.customers if data.source_type == "customer" else db.suppliers
+        src = await col.find_one({"id": data.source_id})
+        if not src: raise HTTPException(status_code=404, detail="الحساب المصدر غير موجود")
+        source_name = src.get("name", source_name)
+        if data.block_negative:
+            projected = src.get("balance", 0) - data.amount
+            if projected < 0:
+                raise HTTPException(status_code=400, detail=f"الرصيد غير كافٍ في {source_name}")
+    else:
+        source_name = source_name or "الصندوق"
+    if data.dest_type in ("customer", "supplier"):
+        col = db.customers if data.dest_type == "customer" else db.suppliers
+        dst = await col.find_one({"id": data.dest_id})
+        if not dst: raise HTTPException(status_code=404, detail="الحساب المستلم غير موجود")
+        dest_name = dst.get("name", dest_name)
+    else:
+        dest_name = dest_name or "الصندوق"
+
+    number = await next_gwd_number()
+    desc_src = data.description or f"تحويل إلى {dest_name}"
+    desc_dst = data.description or f"تحويل من {source_name}"
+
+    # Apply balances / ledger
+    if data.source_type in ("customer", "supplier"):
+        await _adjust_party_balance(data.source_type, data.source_id, -data.amount, number, desc_src)
+    if data.dest_type in ("customer", "supplier"):
+        await _adjust_party_balance(data.dest_type, data.dest_id, data.amount, number, desc_dst)
+
+    when = f"{data.date}T00:00:00+00:00" if data.date else now_iso()
+    doc = {
+        "id": str(uuid.uuid4()), "number": number,
+        "source_type": data.source_type, "source_id": data.source_id, "source_name": source_name,
+        "dest_type": data.dest_type, "dest_id": data.dest_id, "dest_name": dest_name,
+        "amount": float(data.amount), "description": (data.description or "").strip(),
+        "block_negative": bool(data.block_negative),
+        "user_id": user["id"], "username": user.get("username"),
+        "status": "active", "idempotency_key": data.idempotency_key,
+        "created_at": when,
+    }
+    await db.transfers.insert_one(doc)
+    await audit_log(user, "create", "transfer", doc["id"], None, {"amount": data.amount})
+    return clean_doc(doc)
+
+@api.get("/transfers")
+async def list_transfers(user=Depends(require_perm("receipts"))):
+    items = await db.transfers.find({"status": "active"}).sort("created_at", -1).limit(2000).to_list(2000)
+    return [clean_doc(t) for t in items]
+
+
+# ================= UNIFIED ACCOUNTS =================
+@api.get("/accounts")
+async def list_accounts(user=Depends(get_current_user)):
+    """Unified party accounts (customers/POS/suppliers/expense accounts) with balances.
+    Includes a virtual cash account computed on the fly."""
+    out: List[Dict[str, Any]] = []
+    cust = await db.customers.find().to_list(10000)
+    for c in cust:
+        c = clean_doc(c)
+        out.append({
+            "id": c["id"], "type": ("pos" if c.get("customer_type") == "pos" else "customer"),
+            "name": c.get("name",""), "phone": c.get("phone","") or "",
+            "balance": c.get("balance", 0), "opening_balance": c.get("opening_balance", 0),
+            "credit_limit": c.get("credit_limit", 0),
+            "status": c.get("status","active"),
+        })
+    sup = await db.suppliers.find().to_list(10000)
+    for s in sup:
+        s = clean_doc(s)
+        out.append({
+            "id": s["id"], "type": "supplier",
+            "name": s.get("name",""), "phone": s.get("phone","") or "",
+            "balance": s.get("balance", 0), "opening_balance": s.get("opening_balance", 0),
+            "credit_limit": s.get("credit_limit", 0),
+            "status": s.get("status","active"),
+        })
+    accs = await db.expense_accounts.find().to_list(500)
+    # expense accounts don't hold balances but we surface total spent
+    for a in accs:
+        a = clean_doc(a)
+        spent_docs = await db.expenses.find({"account_id": a["id"], "status": "active"}).to_list(20000)
+        spent = sum(x.get("amount", 0) for x in spent_docs)
+        out.append({
+            "id": a["id"], "type": "expense",
+            "name": a.get("name",""), "phone": "",
+            "balance": -spent, "opening_balance": 0,
+            "credit_limit": 0,
+            "status": "active",
+        })
+    # Cash summary as a virtual account
+    cash_all = 0.0
+    sales = await db.sales.find({"status": "active", "sale_type": "cash"}).to_list(20000)
+    recs = await db.receipts.find({"status": "active"}).to_list(20000)
+    exps = await db.expenses.find({"status": "active"}).to_list(20000)
+    trs = await db.transfers.find({"status": "active"}).to_list(20000)
+    cash_all = (sum(s.get("total",0) for s in sales)
+                + sum(r.get("amount",0) for r in recs if r.get("kind")=="receipt")
+                + sum(t.get("amount",0) for t in trs if t.get("dest_type")=="cash")
+                - sum(r.get("amount",0) for r in recs if r.get("kind")=="payment")
+                - sum(e.get("amount",0) for e in exps)
+                - sum(t.get("amount",0) for t in trs if t.get("source_type")=="cash"))
+    out.insert(0, {"id": "cash", "type": "cash", "name": "الصندوق", "phone": "",
+                   "balance": cash_all, "opening_balance": 0, "credit_limit": 0, "status": "active"})
+    return out
+
+
+# ================= OPENING BALANCES REPORT =================
+@api.get("/reports/opening-balances")
+async def report_opening_balances(user=Depends(require_perm("reports"))):
+    rows: List[Dict[str, Any]] = []
+    for c in await db.customers.find({"opening_balance": {"$ne": 0}}).to_list(10000):
+        c = clean_doc(c)
+        rows.append({
+            "id": c["id"], "type": ("pos" if c.get("customer_type") == "pos" else "customer"),
+            "name": c.get("name",""), "phone": c.get("phone","") or "",
+            "opening_balance": c.get("opening_balance", 0),
+            "current_balance": c.get("balance", 0),
+        })
+    for s in await db.suppliers.find({"opening_balance": {"$ne": 0}}).to_list(10000):
+        s = clean_doc(s)
+        rows.append({
+            "id": s["id"], "type": "supplier",
+            "name": s.get("name",""), "phone": s.get("phone","") or "",
+            "opening_balance": s.get("opening_balance", 0),
+            "current_balance": s.get("balance", 0),
+        })
+    return rows
+
+
+# ================= ITEM MOVEMENT REPORT =================
+@api.get("/reports/item-movement")
+async def report_item_movement(
+    category_id: str,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    user=Depends(require_perm("reports")),
+):
+    """Return every inventory movement for a category, sorted chronologically,
+    with running balance (available stock = numbered available + qty available - qty sold).
+    Movements: purchases (+), sales (-), card additions (+)."""
+    cat = await db.card_categories.find_one({"id": category_id})
+    if not cat: raise HTTPException(status_code=404, detail="الفئة غير موجودة")
+    s_iso = f"{start}T00:00:00+00:00" if start else None
+    e_iso = f"{end}T23:59:59+00:00" if end else None
+
+    entries: List[Dict[str, Any]] = []
+    # 1) Purchases (+)
+    async for p in db.purchases.find({"status": "active"}):
+        for it in p.get("items", []):
+            if it.get("category_id") == category_id:
+                entries.append({
+                    "created_at": p.get("created_at",""),
+                    "type": "purchase", "number": p.get("number",""),
+                    "description": f"شراء من {p.get('supplier_name','')}",
+                    "in": it.get("quantity", 0), "out": 0,
+                })
+    # 2) Sales (-)
+    async for s in db.sales.find({"status": "active"}):
+        for it in s.get("items", []):
+            if it.get("category_id") == category_id:
+                entries.append({
+                    "created_at": s.get("created_at",""),
+                    "type": "sale", "number": s.get("number",""),
+                    "description": f"مبيعات — {s.get('customer_name','') or 'نقدي'}",
+                    "in": 0, "out": it.get("quantity", 0),
+                })
+    # 3) Direct card additions (numbered) — count as "in"
+    # Sales/purchases already cover numbered stock changes, so skip separate cards feed.
+
+    entries.sort(key=lambda x: x.get("created_at",""))
+    running = 0.0
+    filtered: List[Dict[str, Any]] = []
+    for e in entries:
+        # opening (before window) accumulates but is not shown
+        running += (e["in"] or 0) - (e["out"] or 0)
+        e["balance"] = running
+        if s_iso and e.get("created_at","") < s_iso: continue
+        if e_iso and e.get("created_at","") > e_iso: continue
+        filtered.append(e)
+
+    # Balance BEFORE window
+    balance_before = 0.0
+    if s_iso:
+        for e in entries:
+            if e.get("created_at","") < s_iso:
+                balance_before += (e["in"] or 0) - (e["out"] or 0)
+
+    total_in = sum(e["in"] for e in filtered)
+    total_out = sum(e["out"] for e in filtered)
+    return {
+        "category": {"id": category_id, "name": cat.get("name","")},
+        "range": {"start": start, "end": end},
+        "balance_before": balance_before,
+        "balance_after": running,
+        "total_in": total_in, "total_out": total_out,
+        "entries": filtered,
+    }
 
 
 # ================= CARD ORDERS (PUBLIC) =================
@@ -2713,6 +2958,8 @@ async def startup():
     await db.sales.create_index("idempotency_key")
     await db.purchases.create_index("number", unique=True)
     await db.purchases.create_index("idempotency_key")
+    await db.transfers.create_index("number")
+    await db.transfers.create_index("idempotency_key")
     await db.receipts.create_index("number", unique=True)
     await db.receipts.create_index("idempotency_key")
     # Seed admin

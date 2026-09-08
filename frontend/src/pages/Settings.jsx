@@ -156,7 +156,27 @@ export default function SettingsPage() {
         <div className="text-lg font-bold text-[#221340]">إعدادات عامة</div>
         <div><Label>اسم الشبكة</Label><Input value={s.company_name || ""} disabled/></div>
         <div><Label>الهاتف</Label><Input value={s.company_phone || ""} disabled/></div>
-        <div><Label>العملة</Label><Input value={s.currency || ""} onChange={(e) => setS({ ...s, currency: e.target.value })} data-testid="set-currency"/></div>
+        <div>
+          <Label>العملة</Label>
+          <Select value={s.currency || "ريال"} onValueChange={(v) => setS({ ...s, currency: v })}>
+            <SelectTrigger data-testid="set-currency"><SelectValue/></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ريال">ريال يمني (ريال)</SelectItem>
+              <SelectItem value="ر.س">ريال سعودي (ر.س)</SelectItem>
+              <SelectItem value="د.إ">درهم إماراتي (د.إ)</SelectItem>
+              <SelectItem value="ج.م">جنيه مصري (ج.م)</SelectItem>
+              <SelectItem value="د.ك">دينار كويتي (د.ك)</SelectItem>
+              <SelectItem value="د.ب">دينار بحريني (د.ب)</SelectItem>
+              <SelectItem value="ر.ع">ريال عماني (ر.ع)</SelectItem>
+              <SelectItem value="ر.ق">ريال قطري (ر.ق)</SelectItem>
+              <SelectItem value="د.ع">دينار عراقي (د.ع)</SelectItem>
+              <SelectItem value="د.أ">دينار أردني (د.أ)</SelectItem>
+              <SelectItem value="ل.س">ليرة سورية (ل.س)</SelectItem>
+              <SelectItem value="USD">دولار أمريكي (USD)</SelectItem>
+              <SelectItem value="EUR">يورو (EUR)</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
         <div><Label>حد التنبيه الافتراضي للمخزون</Label><Input type="number" value={s.low_stock_default || 20} onChange={(e) => setS({ ...s, low_stock_default: Number(e.target.value) })}/></div>
         <div><Label>رابط الشعار</Label><Input value={s.logo_url || ""} onChange={(e) => setS({ ...s, logo_url: e.target.value })}/></div>
         <Button onClick={save} className="bg-[#221340]" data-testid="set-save">حفظ</Button>

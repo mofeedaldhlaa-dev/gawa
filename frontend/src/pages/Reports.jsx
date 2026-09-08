@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import api, { errText } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,8 +14,13 @@ const TAB_TITLES = {
   sales: "تقرير المبيعات", purchases: "تقرير المشتريات",
   electronic: "تقرير المبيعات الإلكترونية", card_order_log: "سجل طلبات الرابط",
   customer_debts: "تقرير مديونية العملاء", supplier_debts: "تقرير مديونية الموردين",
-  stock: "تقرير المخزون",
+  stock: "تقرير المخزون", opening: "تقرير الأرصدة الافتتاحية", movement: "تقرير حركة صنف بالمخزون",
 };
+
+const _iso = (d) => d.toISOString().slice(0, 10);
+const _startOfToday = () => { const d = new Date(); d.setHours(0,0,0,0); return d; };
+const _startOfMonth = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); };
+const _startOfYear = () => { const d = new Date(); return new Date(d.getFullYear(), 0, 1); };
 
 export default function Reports() {
   const { user } = useAuth();
@@ -24,6 +29,17 @@ export default function Reports() {
   const [end, setEnd] = useState("");
   const [data, setData] = useState([]);
   const [q, setQ] = useState("");
+  // order log filters
+  const [olPeriod, setOlPeriod] = useState("all");
+  const [olStatus, setOlStatus] = useState("all");
+  // item movement
+  const [categories, setCategories] = useState([]);
+  const [mvCategory, setMvCategory] = useState("");
+  const [mvStart, setMvStart] = useState(_iso(_startOfMonth()));
+  const [mvEnd, setMvEnd] = useState(_iso(new Date()));
+  const [mvData, setMvData] = useState(null);
+
+  useEffect(() => { api.get("/categories").then((r) => setCategories(r.data)).catch(() => {}); }, []);
 
   const load = async () => {
     const endpoints = {
@@ -31,7 +47,10 @@ export default function Reports() {
       customer_debts: "/reports/customer-debts", supplier_debts: "/reports/supplier-debts",
       stock: "/stock", electronic: "/reports/electronic-sales",
       card_order_log: "/reports/card-order-log",
+      opening: "/reports/opening-balances",
     };
+    if (tab === "movement") return;
+    if (!endpoints[tab]) return;
     const params = ["sales","purchases"].includes(tab) && start && end ? { start, end } : {};
     try {
       const r = await api.get(endpoints[tab], { params });
@@ -40,7 +59,44 @@ export default function Reports() {
   };
   useEffect(() => { load(); }, [tab]);
 
-  const filtered = data.filter((x) => !q || JSON.stringify(x).toLowerCase().includes(q.toLowerCase()));
+  const loadMovement = async () => {
+    if (!mvCategory) { toast.error("اختر الفئة"); return; }
+    try {
+      const r = await api.get("/reports/item-movement", { params: { category_id: mvCategory, start: mvStart, end: mvEnd } });
+      setMvData(r.data);
+    } catch (e) { toast.error(errText(e)); setMvData(null); }
+  };
+
+  const orderLogFiltered = useMemo(() => {
+    if (tab !== "card_order_log") return [];
+    const today = new Date();
+    let s = null, e = null;
+    if (olPeriod === "day") { s = _startOfToday(); e = today; }
+    else if (olPeriod === "month") { s = _startOfMonth(); e = today; }
+    else if (olPeriod === "year") { s = _startOfYear(); e = today; }
+    return data.filter((a) => {
+      if (s || e) {
+        const dt = new Date(a.created_at);
+        if (s && dt < s) return false;
+        if (e && dt > e) return false;
+      }
+      if (olStatus !== "all" && a.status !== olStatus) return false;
+      if (q && !JSON.stringify(a).toLowerCase().includes(q.toLowerCase())) return false;
+      return true;
+    });
+  }, [data, olPeriod, olStatus, q, tab]);
+
+  const orderLogSummary = useMemo(() => {
+    const total = orderLogFiltered.length;
+    const success = orderLogFiltered.filter((a) => a.status === "success").length;
+    const rejected = total - success;
+    const value = orderLogFiltered.reduce((s, a) => s + (a.total || 0), 0);
+    return { total, success, rejected, value };
+  }, [orderLogFiltered]);
+
+  const filtered = tab === "card_order_log"
+    ? orderLogFiltered
+    : data.filter((x) => !q || JSON.stringify(x).toLowerCase().includes(q.toLowerCase()));
   const username = user?.name || user?.username;
 
   const printCurrent = () => {
@@ -60,9 +116,18 @@ export default function Reports() {
         totals: [{ label: "الإجمالي", value: fmt(total) }], username,
       });
     } else if (tab === "card_order_log") {
+      const labelP = { all: "الكل", day: "يومي", month: "شهري", year: "سنوي" }[olPeriod];
+      const labelS = { all: "الكل", success: "ناجح", rejected_over_limit: "مرفوض - تجاوز السقف", rejected_no_stock: "مرفوض - عدم توفر", rejected_no_customer: "غير موجود" }[olStatus] || "الكل";
       printReport({
-        title, headers: ["التاريخ","العميل","الهاتف","الفئة","الكمية","القيمة","الحالة","السبب"],
+        title: `${title} — الفترة: ${labelP} — الحالة: ${labelS}`,
+        headers: ["التاريخ","العميل","الهاتف","الفئة","الكمية","القيمة","الحالة","السبب"],
         rows: filtered.map((a) => [fmtDate(a.created_at), a.customer_name || "-", a.phone, a.category_name || "-", a.quantity || 0, fmt(a.total || 0), a.status==="success"?"ناجح":a.status==="rejected_over_limit"?"مرفوض - تجاوز السقف":a.status==="rejected_no_stock"?"مرفوض - عدم توفر":"مرفوض - غير موجود", a.reason || "-"]),
+        totals: [
+          { label: "عدد الطلبات", value: orderLogSummary.total },
+          { label: "الناجحة", value: orderLogSummary.success },
+          { label: "المرفوضة", value: orderLogSummary.rejected },
+          { label: "القيمة الإجمالية للناجحة", value: fmt(orderLogSummary.value) },
+        ],
         username,
       });
     } else if (tab === "customer_debts" || tab === "supplier_debts") {
@@ -79,6 +144,26 @@ export default function Reports() {
         rows: filtered.map((s) => [s.category_name, s.numbered?.total || 0, s.numbered?.available || 0, s.numbered?.sold || 0, s.quantity?.total || 0, s.quantity?.available || 0, s.available_total || 0]),
         username,
       });
+    } else if (tab === "opening") {
+      const total = filtered.reduce((s, x) => s + (x.opening_balance || 0), 0);
+      printReport({
+        title, headers: ["النوع", "الاسم", "الهاتف", "الرصيد الافتتاحي", "الرصيد الحالي"],
+        rows: filtered.map((c) => [c.type==="supplier"?"مورد":c.type==="pos"?"نقطة بيع":"عميل", c.name, c.phone || "-", fmt(c.opening_balance), fmt(c.current_balance)]),
+        totals: [{ label: "إجمالي الأرصدة الافتتاحية", value: fmt(total) }], username,
+      });
+    } else if (tab === "movement" && mvData) {
+      printReport({
+        title: `${title} — ${mvData.category?.name} — من ${mvStart} إلى ${mvEnd}`,
+        headers: ["التاريخ", "الرقم", "البيان", "وارد", "صادر", "الرصيد"],
+        rows: mvData.entries.map((e) => [fmtDate(e.created_at), e.number || "-", e.description, e.in || "-", e.out || "-", e.balance]),
+        totals: [
+          { label: "الرصيد قبل الفترة", value: mvData.balance_before },
+          { label: "إجمالي الوارد", value: mvData.total_in },
+          { label: "إجمالي الصادر", value: mvData.total_out },
+          { label: "الرصيد بعد الفترة", value: mvData.balance_after },
+        ],
+        username,
+      });
     }
   };
 
@@ -93,6 +178,8 @@ export default function Reports() {
           <TabsTrigger value="customer_debts" data-testid="rep-cdebts">مديونية العملاء</TabsTrigger>
           <TabsTrigger value="supplier_debts" data-testid="rep-sdebts">مديونية الموردين</TabsTrigger>
           <TabsTrigger value="stock" data-testid="rep-stock">المخزون</TabsTrigger>
+          <TabsTrigger value="opening" data-testid="rep-opening">الأرصدة الافتتاحية</TabsTrigger>
+          <TabsTrigger value="movement" data-testid="rep-movement">حركة صنف</TabsTrigger>
         </TabsList>
 
         <Card className="p-3 flex flex-col sm:flex-row gap-2 sm:items-end flex-wrap mt-3 no-print">
@@ -103,9 +190,52 @@ export default function Reports() {
               <Button onClick={load} className="bg-[#221340] w-full sm:w-auto">تصفية</Button>
             </>
           )}
-          <Input placeholder="بحث..." value={q} onChange={(e) => setQ(e.target.value)} className="w-full sm:max-w-xs"/>
+          {tab === "card_order_log" && (
+            <>
+              <div className="w-full sm:w-auto">
+                <label className="text-xs">الفترة</label>
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {[["all","الكل"],["day","اليوم"],["month","الشهر"],["year","السنة"]].map(([k,l]) => (
+                    <button key={k} onClick={() => setOlPeriod(k)} className={`px-2 py-1 rounded-full text-xs border ${olPeriod===k?"bg-[#452480] text-white border-[#452480]":"border-slate-300"}`} data-testid={`ol-period-${k}`}>{l}</button>
+                  ))}
+                </div>
+              </div>
+              <div className="w-full sm:w-auto">
+                <label className="text-xs">الحالة</label>
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {[["all","الكل"],["success","ناجح"],["rejected_over_limit","تجاوز السقف"],["rejected_no_stock","لا يوجد مخزون"],["rejected_no_customer","غير موجود"]].map(([k,l]) => (
+                    <button key={k} onClick={() => setOlStatus(k)} className={`px-2 py-1 rounded-full text-xs border ${olStatus===k?"bg-[#221340] text-white border-[#221340]":"border-slate-300"}`} data-testid={`ol-status-${k}`}>{l}</button>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+          {tab === "movement" && (
+            <>
+              <div className="w-full sm:w-64">
+                <label className="text-xs">الفئة</label>
+                <select value={mvCategory} onChange={(e) => setMvCategory(e.target.value)} className="w-full border rounded p-2 text-sm" data-testid="mv-category">
+                  <option value="">اختر</option>
+                  {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+              <div><label className="text-xs">من</label><Input type="date" value={mvStart} onChange={(e) => setMvStart(e.target.value)} data-testid="mv-start"/></div>
+              <div><label className="text-xs">إلى</label><Input type="date" value={mvEnd} onChange={(e) => setMvEnd(e.target.value)} data-testid="mv-end"/></div>
+              <Button onClick={loadMovement} className="bg-[#221340] w-full sm:w-auto" data-testid="mv-load">عرض الحركة</Button>
+            </>
+          )}
+          {tab !== "movement" && <Input placeholder="بحث..." value={q} onChange={(e) => setQ(e.target.value)} className="w-full sm:max-w-xs"/>}
           <Button onClick={printCurrent} variant="outline" data-testid="print-report" className="w-full sm:w-auto"><Printer size={14} className="ml-1"/> طباعة / PDF</Button>
         </Card>
+
+        {tab === "card_order_log" && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 no-print mt-3" data-testid="ol-summary">
+            <Card className="p-3"><div className="text-xs text-slate-500">إجمالي الطلبات</div><div className="text-xl font-bold">{orderLogSummary.total}</div></Card>
+            <Card className="p-3"><div className="text-xs text-slate-500">ناجحة</div><div className="text-xl font-bold text-green-700">{orderLogSummary.success}</div></Card>
+            <Card className="p-3"><div className="text-xs text-slate-500">مرفوضة</div><div className="text-xl font-bold text-red-700">{orderLogSummary.rejected}</div></Card>
+            <Card className="p-3"><div className="text-xs text-slate-500">القيمة الناجحة</div><div className="text-xl font-bold num">{fmt(orderLogSummary.value)}</div></Card>
+          </div>
+        )}
 
         <TabsContent value="sales"><ReportTable data={filtered} kind="sales"/></TabsContent>
         <TabsContent value="purchases"><ReportTable data={filtered} kind="purchases"/></TabsContent>
@@ -114,6 +244,8 @@ export default function Reports() {
         <TabsContent value="customer_debts"><DebtTable data={filtered} label="العميل"/></TabsContent>
         <TabsContent value="supplier_debts"><DebtTable data={filtered} label="المورد"/></TabsContent>
         <TabsContent value="stock"><StockTable data={filtered}/></TabsContent>
+        <TabsContent value="opening"><OpeningTable data={filtered}/></TabsContent>
+        <TabsContent value="movement"><MovementTable data={mvData}/></TabsContent>
       </Tabs>
     </div>
   );
@@ -189,5 +321,62 @@ const StockTable = ({ data }) => {
         <tbody>{data.map((s) => <tr key={s.category_id} className={`border-t ${s.low_stock?'bg-amber-50':''}`}><td className="p-2">{s.category_name}</td><td className="p-2 num">{s.numbered?.total || 0}</td><td className="p-2 num text-green-600">{s.numbered?.available || 0}</td><td className="p-2 num">{s.numbered?.sold || 0}</td><td className="p-2 num">{s.quantity?.total || 0}</td><td className="p-2 num text-green-600">{s.quantity?.available || 0}</td><td className="p-2 num font-bold">{s.available_total || 0}</td></tr>)}</tbody>
       </table>
     </Card>
+  );
+};
+
+
+const OpeningTable = ({ data }) => {
+  const total = (data || []).reduce((s, x) => s + (x.opening_balance || 0), 0);
+  return (
+    <Card className="mt-3 overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="bg-slate-50"><tr className="text-right"><th className="p-2">النوع</th><th className="p-2">الاسم</th><th className="p-2">الهاتف</th><th className="p-2">الرصيد الافتتاحي</th><th className="p-2">الرصيد الحالي</th></tr></thead>
+        <tbody>
+          {(data || []).map((c) => (
+            <tr key={`${c.type}-${c.id}`} className="border-t">
+              <td className="p-2">{c.type === "supplier" ? "مورد" : c.type === "pos" ? "نقطة بيع" : "عميل"}</td>
+              <td className="p-2">{c.name}</td>
+              <td className="p-2 font-mono text-xs">{c.phone || "-"}</td>
+              <td className="p-2 num font-bold">{fmt(c.opening_balance)}</td>
+              <td className="p-2 num">{fmt(c.current_balance)}</td>
+            </tr>
+          ))}
+          {(!data || data.length === 0) && <tr><td colSpan={5} className="p-4 text-center text-slate-400">لا توجد أرصدة افتتاحية</td></tr>}
+        </tbody>
+        <tfoot><tr className="bg-slate-100 font-bold"><td colSpan={3} className="p-2">الإجمالي</td><td className="p-2 num">{fmt(total)}</td><td></td></tr></tfoot>
+      </table>
+    </Card>
+  );
+};
+
+const MovementTable = ({ data }) => {
+  if (!data) return <Card className="mt-3 p-6 text-center text-slate-400">اختر فئة واضغط "عرض الحركة"</Card>;
+  return (
+    <div className="space-y-3 mt-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        <Card className="p-3"><div className="text-xs text-slate-500">رصيد قبل الفترة</div><div className="text-xl font-bold num">{fmt(data.balance_before)}</div></Card>
+        <Card className="p-3"><div className="text-xs text-slate-500">وارد</div><div className="text-xl font-bold text-green-700 num">{fmt(data.total_in)}</div></Card>
+        <Card className="p-3"><div className="text-xs text-slate-500">صادر</div><div className="text-xl font-bold text-red-700 num">{fmt(data.total_out)}</div></Card>
+        <Card className="p-3"><div className="text-xs text-slate-500">رصيد بعد الفترة</div><div className="text-xl font-bold text-[#452480] num">{fmt(data.balance_after)}</div></Card>
+      </div>
+      <Card className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50"><tr className="text-right"><th className="p-2">التاريخ</th><th className="p-2">الرقم</th><th className="p-2">البيان</th><th className="p-2">وارد</th><th className="p-2">صادر</th><th className="p-2">الرصيد</th></tr></thead>
+          <tbody>
+            {data.entries.map((e, i) => (
+              <tr key={i} className="border-t">
+                <td className="p-2">{fmtDate(e.created_at)}</td>
+                <td className="p-2 font-mono">{e.number || "-"}</td>
+                <td className="p-2">{e.description}</td>
+                <td className="p-2 num text-green-700">{e.in || "-"}</td>
+                <td className="p-2 num text-red-700">{e.out || "-"}</td>
+                <td className="p-2 num font-bold">{e.balance}</td>
+              </tr>
+            ))}
+            {data.entries.length === 0 && <tr><td colSpan={6} className="p-4 text-center text-slate-400">لا توجد حركات ضمن الفترة</td></tr>}
+          </tbody>
+        </table>
+      </Card>
+    </div>
   );
 };
