@@ -1,11 +1,7 @@
 # Jawad Net Wireless — ERP (Arabic RTL)
 
 ## Original problem statement
-Comprehensive Arabic (RTL) Web-based ERP for شبكة جواد نت اللاسلكية:
-accounting, sales, purchases, inventory, suppliers, customers, card management,
-offline-first with sync, hardened customer portal (`/order`) with device
-binding, A4 print templates, automated daily email backups, biometric login,
-file/media storage.
+Comprehensive Arabic (RTL) Web-based ERP for شبكة جواد نت اللاسلكية.
 
 ## Stack
 - Frontend: React + TailwindCSS + Shadcn UI (RTL)
@@ -18,32 +14,30 @@ file/media storage.
 ## Implemented (recent)
 - Cloud backup daily + email download link
 - Login by email OR username (case-insensitive)
-- Enable/Disable accounts (users + customers) — 403 everywhere
+- Enable/Disable accounts (users + customers) with 403 everywhere
 - Disabled account UX (portal banner + WhatsApp CS button + statement banner)
 - Admin management (role radio, hard delete with last-admin + self safety)
 - Send card to another phone + Contact Picker + auto SMS delivery
-- Recipient info in all invoices, orders, sale view dialog, and history cards
+- Recipient info in invoices, sale view dialog, previous-orders history
 - Contact name shown under phone in card-order screen
-- Remember Me + auto-fill on customer portal (localStorage base64) with explicit clear button
-- **2026-02: Print account statement from customer portal**
-  - New public endpoint `POST /api/public/card-order/statement` — phone+password auth, returns customer + ledger entries; password removed from response; enforces disabled=403
-  - Reuses existing `printStatement` A4 template — header, customer info, ledger table, totals, footer
-  - Purple outlined button "طباعة كشف الحساب" placed inside customer info card, shown right after login
-  - Loading state and toast error handling
+- Remember Me + auto-fill on customer portal (localStorage base64)
+- Print account statement from customer portal
+- **2026-02: Date-range statement printing**
+  - Backend endpoint now accepts `start` and `end` (YYYY-MM-DD), computes opening balance from prior entries, injects a synthetic "رصيد افتتاحي حتى <start>" row, and recalculates running balance across the window
+  - Frontend dialog with two date inputs + presets ("هذا الشهر", "هذا العام", "كل الفترات") + Print button
+  - Print template picks up an optional `rangeTitle` for the printed title (e.g., "كشف حساب من 2026-02-01 إلى 2026-02-08")
 
 ## API cheatsheet
+- `POST /api/public/card-order/statement` — `{phone, password, start?, end?}` → `{customer, entries, range, opening_balance, closing_balance}`
+- `POST /api/public/card-order/login` / `request` / `my-orders`
 - `POST /api/auth/login` — `{username|email, password}`
-- `POST /api/public/card-order/login`
-- `POST /api/public/card-order/request` — `{phone, password, category_id, quantity, recipient_phone?}`
-- `POST /api/public/card-order/statement` — `{phone, password}` → `{customer, entries[]}`
-- `POST /api/public/card-order/my-orders` — history
 - `POST /api/users/{uid}/toggle-status` • `DELETE /api/users/{uid}/permanent`
 - `POST /api/customers/{cid}/toggle-status`
 - `POST /api/backup/run-now` • `GET /api/backup/latest` • `POST /api/backup/restore-latest`
 
 ## Deferred / Alternatives
-- MongoDB Atlas migration BLOCKED (Atlas IP firewall). Replaced by cloud backup.
+- MongoDB Atlas migration BLOCKED. Replaced by cloud backup.
 - P0: Biometric login (WebAuthn/Passkeys) — deferred
 - P2: Separate deployment for `/order` vs admin
-- P2: Refactor server.py (~2540 lines) into `routers/`
+- P2: Refactor server.py (~2580 lines) into `routers/`
 - Automatic (Twilio) SMS — deferred; user chose free client-side option

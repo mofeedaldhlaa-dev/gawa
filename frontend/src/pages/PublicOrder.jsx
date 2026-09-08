@@ -81,18 +81,39 @@ export default function PublicOrder() {
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [printingStmt, setPrintingStmt] = useState(false);
+  const [showStmtDialog, setShowStmtDialog] = useState(false);
+  const [stmtStart, setStmtStart] = useState("");
+  const [stmtEnd, setStmtEnd] = useState("");
 
-  const printAccountStatement = async () => {
+  const runPrintStatement = async ({ start = "", end = "" } = {}) => {
     setPrintingStmt(true);
     try {
-      const r = await api.post("/public/card-order/statement", { phone, password });
+      const body = { phone, password };
+      if (start) body.start = start;
+      if (end) body.end = end;
+      const r = await api.post("/public/card-order/statement", body);
+      const rangeTitle = start || end
+        ? `كشف حساب من ${start || "البداية"} إلى ${end || "اليوم"}`
+        : null;
       printStatement({
         customer: r.data.customer,
         entries: r.data.entries,
         username: r.data.customer?.name || "",
+        rangeTitle,
       });
+      setShowStmtDialog(false);
     } catch (e) { toast.error(errText(e)); }
     setPrintingStmt(false);
+  };
+
+  const openStmtDialog = () => {
+    // Default range: current month
+    const now = new Date();
+    const first = new Date(now.getFullYear(), now.getMonth(), 1);
+    const iso = (d) => d.toISOString().slice(0, 10);
+    setStmtStart(iso(first));
+    setStmtEnd(iso(now));
+    setShowStmtDialog(true);
   };
 
   const contactCSForDeviceChange = () => {
@@ -347,14 +368,14 @@ export default function PublicOrder() {
               <div className="mt-2 pt-2 border-t border-slate-200">
                 <Button
                   type="button"
-                  onClick={printAccountStatement}
+                  onClick={openStmtDialog}
                   disabled={printingStmt}
                   variant="outline"
                   size="sm"
                   className="w-full border-[#452480] text-[#452480] hover:bg-[#452480]/10"
                   data-testid="po-print-statement"
                 >
-                  <FileText size={14} className="ml-1"/> {printingStmt ? "جاري التحضير..." : "طباعة كشف الحساب"}
+                  <FileText size={14} className="ml-1"/> طباعة كشف الحساب
                 </Button>
               </div>
             </Card>
@@ -533,6 +554,34 @@ export default function PublicOrder() {
       </Dialog>
       <Dialog open={showChangePwd} onOpenChange={setShowChangePwd}>
         <ChangePasswordForm phone={phone} currentPassword={password} onClose={() => setShowChangePwd(false)} onDone={(np) => setPassword(np)}/>
+      </Dialog>
+      <Dialog open={showStmtDialog} onOpenChange={setShowStmtDialog}>
+        <DialogContent className="max-w-md" data-testid="po-stmt-dialog">
+          <DialogHeader><DialogTitle className="text-right">تحديد فترة كشف الحساب</DialogTitle></DialogHeader>
+          <div className="space-y-3 pt-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>من تاريخ</Label>
+                <Input type="date" value={stmtStart} onChange={(e) => setStmtStart(e.target.value)} data-testid="po-stmt-start"/>
+              </div>
+              <div>
+                <Label>إلى تاريخ</Label>
+                <Input type="date" value={stmtEnd} onChange={(e) => setStmtEnd(e.target.value)} data-testid="po-stmt-end"/>
+              </div>
+            </div>
+            <div className="flex gap-2 flex-wrap text-xs">
+              <button type="button" onClick={() => { const d=new Date(); setStmtStart(new Date(d.getFullYear(),d.getMonth(),1).toISOString().slice(0,10)); setStmtEnd(d.toISOString().slice(0,10)); }} className="px-2 py-1 rounded border border-slate-300 hover:bg-slate-50" data-testid="po-stmt-preset-month">هذا الشهر</button>
+              <button type="button" onClick={() => { const d=new Date(); setStmtStart(new Date(d.getFullYear(),0,1).toISOString().slice(0,10)); setStmtEnd(d.toISOString().slice(0,10)); }} className="px-2 py-1 rounded border border-slate-300 hover:bg-slate-50" data-testid="po-stmt-preset-year">هذا العام</button>
+              <button type="button" onClick={() => { setStmtStart(""); setStmtEnd(""); }} className="px-2 py-1 rounded border border-slate-300 hover:bg-slate-50" data-testid="po-stmt-preset-all">كل الفترات</button>
+            </div>
+            <div className="flex gap-2 pt-2 border-t">
+              <Button onClick={() => runPrintStatement({ start: stmtStart, end: stmtEnd })} disabled={printingStmt} className="flex-1 bg-[#452480] hover:bg-[#5A2FA0]" data-testid="po-stmt-print">
+                <FileText size={14} className="ml-1"/> {printingStmt ? "جاري التحضير..." : "طباعة"}
+              </Button>
+              <Button variant="outline" onClick={() => setShowStmtDialog(false)}>إلغاء</Button>
+            </div>
+          </div>
+        </DialogContent>
       </Dialog>
     </div>
   );

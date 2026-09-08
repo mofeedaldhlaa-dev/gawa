@@ -219,7 +219,7 @@ export const printReceipt = ({ receipt, party, username }) => {
   openPrintWindow(html);
 };
 
-export const printStatement = ({ customer, entries, username }) => {
+export const printStatement = ({ customer, entries, username, rangeTitle }) => {
   const rows = (entries || []).map((e) => `<tr>
     <td>${fmtDateOnly(e.created_at)}</td>
     <td>${e.op_number || "-"}</td>
@@ -231,7 +231,7 @@ export const printStatement = ({ customer, entries, username }) => {
   const totalDebit = (entries || []).reduce((s, e) => s + (e.debit || 0), 0);
   const totalCredit = (entries || []).reduce((s, e) => s + (e.credit || 0), 0);
   const html = `
-    <div class="title">كشف حساب — ${customer.name}</div>
+    <div class="title">${rangeTitle || `كشف حساب — ${customer.name}`}</div>
     <div class="info-grid">
       <div class="info-row"><span class="lbl">اسم الحساب</span><span class="val">${customer.name}</span></div>
       <div class="info-row"><span class="lbl">نوع الحساب</span><span class="val">${(customer.customer_type || "customer") === "pos" ? "نقطة بيع" : "عميل"}</span></div>

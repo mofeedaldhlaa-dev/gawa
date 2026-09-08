@@ -1786,11 +1786,13 @@ async def public_my_orders(data: CardOrderHistoryIn):
 class StatementIn(BaseModel):
     phone: str
     password: str
+    start: Optional[str] = None  # YYYY-MM-DD
+    end: Optional[str] = None    # YYYY-MM-DD
 
 @api.post("/public/card-order/statement")
 async def public_customer_statement(data: StatementIn):
     """Return customer + ledger entries for the customer portal statement print.
-    Auth via phone+password."""
+    Auth via phone+password. Optional date range with correct opening balance."""
     customer = await db.customers.find_one({"phone": data.phone})
     if not customer:
         raise HTTPException(status_code=404, detail="لاتمتلك حساب بهذا الرقم")
@@ -1798,10 +1800,51 @@ async def public_customer_statement(data: StatementIn):
         raise HTTPException(status_code=401, detail="كلمة السر غير صحيحة")
     if customer.get("status") == "disabled":
         raise HTTPException(status_code=403, detail="الحساب معطل")
-    entries = await db.ledger.find({"party_type": "customer", "party_id": customer["id"]}).sort("created_at", 1).to_list(10000)
+
+    base_q: Dict[str, Any] = {"party_type": "customer", "party_id": customer["id"]}
+    opening_balance = 0.0
+    start_iso = f"{data.start}T00:00:00+00:00" if data.start else None
+    end_iso = f"{data.end}T23:59:59+00:00" if data.end else None
+
+    if start_iso:
+        # Compute opening balance from ALL entries before the start date
+        prior = await db.ledger.find({**base_q, "created_at": {"$lt": start_iso}}).sort("created_at", 1).to_list(100000)
+        for e in prior:
+            opening_balance += (e.get("debit") or 0) - (e.get("credit") or 0)
+
+    rng: Dict[str, Any] = {}
+    if start_iso: rng["$gte"] = start_iso
+    if end_iso: rng["$lte"] = end_iso
+    q = {**base_q, "created_at": rng} if rng else base_q
+    entries_raw = await db.ledger.find(q).sort("created_at", 1).to_list(10000)
+
+    entries: List[Dict[str, Any]] = []
+    if start_iso and opening_balance != 0:
+        entries.append({
+            "id": "opening", "op_number": "-",
+            "description": f"رصيد افتتاحي حتى {data.start}",
+            "debit": opening_balance if opening_balance > 0 else 0,
+            "credit": abs(opening_balance) if opening_balance < 0 else 0,
+            "balance": opening_balance,
+            "created_at": f"{data.start}T00:00:00+00:00",
+        })
+    # Re-compute running balance across the returned window starting from opening_balance
+    running = opening_balance
+    for e in entries_raw:
+        running += (e.get("debit") or 0) - (e.get("credit") or 0)
+        d = clean_doc(e)
+        d["balance"] = running
+        entries.append(d)
+
     c = clean_doc(customer)
     c.pop("password", None)
-    return {"customer": c, "entries": [clean_doc(e) for e in entries]}
+    return {
+        "customer": c,
+        "entries": entries,
+        "range": {"start": data.start, "end": data.end},
+        "opening_balance": opening_balance,
+        "closing_balance": running,
+    }
 
 @api.get("/orders")
 async def list_orders(user=Depends(require_perm("card_orders"))):
