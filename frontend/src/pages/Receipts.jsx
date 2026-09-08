@@ -11,7 +11,14 @@ import { toast } from "sonner";
 import { fmt, fmtDate, genUUID, openWhatsApp, buildReceiptMessage } from "@/lib/utils";
 import { printReceipt } from "@/lib/print";
 import { useAuth } from "@/lib/auth";
-import { Plus, Printer, MessageCircle, X } from "lucide-react";
+import { Plus, Printer, MessageCircle, X, Filter } from "lucide-react";
+import { printReport } from "@/lib/print";
+import { useMemo } from "react";
+
+const _iso = (d) => d.toISOString().slice(0, 10);
+const _startOfToday = () => { const d = new Date(); d.setHours(0,0,0,0); return d; };
+const _startOfMonth = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); };
+const _startOfYear = () => { const d = new Date(); return new Date(d.getFullYear(), 0, 1); };
 
 export default function Receipts() {
   const { user } = useAuth();
@@ -27,6 +34,50 @@ export default function Receipts() {
   const [saved, setSaved] = useState(null);
   const [editing, setEditing] = useState(null);
   const [settings, setSettings] = useState({ company_name: "شبكة جواد نت اللاسلكية" });
+  const [period, setPeriod] = useState("month");
+  const [rstart, setRstart] = useState(_iso(_startOfMonth()));
+  const [rend, setRend] = useState(_iso(new Date()));
+  const [rkind, setRkind] = useState("all"); // all | receipt | payment
+
+  const applyPeriod = (p) => {
+    setPeriod(p); const today = new Date();
+    if (p === "day") { setRstart(_iso(_startOfToday())); setRend(_iso(today)); }
+    else if (p === "month") { setRstart(_iso(_startOfMonth())); setRend(_iso(today)); }
+    else if (p === "year") { setRstart(_iso(_startOfYear())); setRend(_iso(today)); }
+  };
+
+  const filtered = useMemo(() => {
+    const s = rstart ? new Date(rstart + "T00:00:00") : null;
+    const e = rend ? new Date(rend + "T23:59:59") : null;
+    return items.filter((it) => {
+      const dt = new Date(it.created_at);
+      if (s && dt < s) return false;
+      if (e && dt > e) return false;
+      if (rkind !== "all" && it.kind !== rkind) return false;
+      return true;
+    });
+  }, [items, rstart, rend, rkind]);
+
+  const totalReceipts = useMemo(() => filtered.filter((r) => r.kind === "receipt").reduce((s, r) => s + (r.amount || 0), 0), [filtered]);
+  const totalPayments = useMemo(() => filtered.filter((r) => r.kind === "payment").reduce((s, r) => s + (r.amount || 0), 0), [filtered]);
+
+  const printReportFiltered = () => {
+    if (!filtered.length) { toast.error("لا توجد سندات ضمن الفلترة"); return; }
+    const labelP = { day: "يومي", month: "شهري", year: "سنوي", custom: "مخصص" }[period];
+    const labelK = { all: "الكل", receipt: "قبض", payment: "صرف" }[rkind];
+    printReport({
+      title: `تقرير السندات ${labelP} (${labelK}) — من ${rstart || "البداية"} إلى ${rend || "اليوم"}`,
+      headers: ["الرقم", "التاريخ", "النوع", "الطرف", "المبلغ", "البيان"],
+      rows: filtered.map((r) => [r.number, fmtDate(r.created_at), r.kind === "receipt" ? "قبض" : "صرف", r.party_name || "-", fmt(r.amount), r.description || "-"]),
+      totals: [
+        { label: "عدد السندات", value: filtered.length },
+        { label: "إجمالي القبض", value: fmt(totalReceipts) },
+        { label: "إجمالي الصرف", value: fmt(totalPayments) },
+        { label: "صافي الحركة", value: fmt(totalReceipts - totalPayments) },
+      ],
+      username: user?.name || user?.username,
+    });
+  };
 
   const load = async () => setItems((await api.get("/receipts")).data);
   useEffect(() => {
@@ -69,7 +120,8 @@ export default function Receipts() {
 
   return (
     <div className="space-y-4" data-testid="receipts-page">
-      <div className="flex justify-end no-print">
+      <div className="flex justify-between flex-wrap gap-2 no-print">
+        <Button onClick={printReportFiltered} variant="outline" className="border-[#452480] text-[#452480]" data-testid="rec-print-report"><Printer size={14} className="ml-1"/> طباعة التقرير</Button>
         <Dialog open={open} onOpenChange={(o) => { setOpen(o); }}>
           <DialogTrigger asChild><Button className="bg-[#221340]" data-testid="new-receipt-btn"><Plus size={16} className="ml-1"/> سند جديد</Button></DialogTrigger>
           <DialogContent><DialogHeader><DialogTitle>سند جديد</DialogTitle></DialogHeader>
@@ -101,6 +153,31 @@ export default function Receipts() {
             </div>
           </DialogContent>
         </Dialog>
+      </div>
+
+      <Card className="p-3 no-print" data-testid="rec-filters">
+        <div className="flex items-center gap-2 mb-3 text-sm text-slate-600"><Filter size={14}/> فلترة</div>
+        <div className="flex flex-wrap gap-2 mb-3">
+          {[["day","يومي"],["month","شهري"],["year","سنوي"],["custom","مخصص"]].map(([k,l]) => (
+            <button key={k} onClick={() => applyPeriod(k)} className={`px-3 py-1.5 rounded-full text-xs border ${period===k?"bg-[#452480] text-white border-[#452480]":"border-slate-300 hover:bg-slate-50"}`} data-testid={`rec-period-${k}`}>{l}</button>
+          ))}
+        </div>
+        <div className="grid grid-cols-2 gap-2 mb-3">
+          <div><Label className="text-xs">من</Label><Input type="date" value={rstart} onChange={(e) => { setRstart(e.target.value); setPeriod("custom"); }} data-testid="rec-start"/></div>
+          <div><Label className="text-xs">إلى</Label><Input type="date" value={rend} onChange={(e) => { setRend(e.target.value); setPeriod("custom"); }} data-testid="rec-end"/></div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {[["all","الكل"],["receipt","قبض"],["payment","صرف"]].map(([k,l]) => (
+            <button key={k} onClick={() => setRkind(k)} className={`px-3 py-1.5 rounded-full text-xs border ${rkind===k?"bg-[#221340] text-white border-[#221340]":"border-slate-300 hover:bg-slate-50"}`} data-testid={`rec-kind-${k}`}>{l}</button>
+          ))}
+        </div>
+      </Card>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 no-print" data-testid="rec-summary">
+        <Card className="p-3"><div className="text-xs text-slate-500">عدد السندات</div><div className="text-xl font-bold">{filtered.length}</div></Card>
+        <Card className="p-3"><div className="text-xs text-slate-500">إجمالي القبض</div><div className="text-xl font-bold num text-green-700">{fmt(totalReceipts)}</div></Card>
+        <Card className="p-3"><div className="text-xs text-slate-500">إجمالي الصرف</div><div className="text-xl font-bold num text-blue-700">{fmt(totalPayments)}</div></Card>
+        <Card className="p-3"><div className="text-xs text-slate-500">صافي الحركة</div><div className={`text-xl font-bold num ${totalReceipts-totalPayments>=0?"text-emerald-700":"text-red-700"}`}>{fmt(totalReceipts-totalPayments)}</div></Card>
       </div>
 
       {/* Success Dialog */}
@@ -144,7 +221,7 @@ export default function Receipts() {
         <table className="w-full text-sm">
           <thead className="bg-slate-50"><tr className="text-right"><th className="p-3">الرقم</th><th className="p-3">التاريخ</th><th className="p-3">النوع</th><th className="p-3">الطرف</th><th className="p-3">المبلغ</th><th className="p-3">الرصيد بعد</th><th></th></tr></thead>
           <tbody>
-            {items.map((r) => {
+            {filtered.map((r) => {
               const p = (r.party_type === "customer" ? customers : suppliers).find((x) => x.id === r.party_id);
               return (
                 <tr key={r.id} className="border-t border-slate-100">
@@ -162,12 +239,12 @@ export default function Receipts() {
                 </tr>
               );
             })}
-            {items.length === 0 && <tr><td colSpan={7} className="p-6 text-center text-slate-400">لا توجد سندات</td></tr>}
+            {filtered.length === 0 && <tr><td colSpan={7} className="p-6 text-center text-slate-400">لا توجد سندات ضمن الفلترة</td></tr>}
           </tbody>
         </table>
       </Card>
       <div className="md:hidden space-y-2 no-print">
-        {items.map((r) => {
+        {filtered.map((r) => {
           const p = (r.party_type === "customer" ? customers : suppliers).find((x) => x.id === r.party_id);
           return (
             <Card key={r.id} className="p-3">
@@ -192,7 +269,7 @@ export default function Receipts() {
             </Card>
           );
         })}
-        {items.length === 0 && <div className="text-center text-slate-400 p-6">لا توجد سندات</div>}
+        {filtered.length === 0 && <div className="text-center text-slate-400 p-6">لا توجد سندات ضمن الفلترة</div>}
       </div>
     </div>
   );

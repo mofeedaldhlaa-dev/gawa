@@ -1,9 +1,75 @@
 import { useEffect, useState } from "react";
 import api from "@/lib/api";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { fmt, fmtDate } from "@/lib/utils";
+import { printReport } from "@/lib/print";
+import { toast } from "sonner";
 import { Link } from "react-router-dom";
-import { ShoppingCart, Package, Users, Truck, Boxes, CreditCard, Receipt, FileBarChart, Ticket, PlusCircle, AlertTriangle } from "lucide-react";
+import { ShoppingCart, Package, Users, Truck, Boxes, CreditCard, Receipt, FileBarChart, Ticket, PlusCircle, AlertTriangle, Wallet, Printer } from "lucide-react";
+
+const _iso = (d) => d.toISOString().slice(0, 10);
+const _startOfToday = () => { const d = new Date(); d.setHours(0,0,0,0); return d; };
+const _startOfMonth = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); };
+const _startOfYear = () => { const d = new Date(); return new Date(d.getFullYear(), 0, 1); };
+
+function CashBox() {
+  const [period, setPeriod] = useState("month");
+  const [start, setStart] = useState(_iso(_startOfMonth()));
+  const [end, setEnd] = useState(_iso(new Date()));
+  const [data, setData] = useState(null);
+  const load = () => api.get("/cash/summary", { params: { start, end } }).then((r) => setData(r.data)).catch(() => {});
+  useEffect(() => { load(); }, [start, end]);
+  const apply = (p) => {
+    setPeriod(p); const today = new Date();
+    if (p === "day") { setStart(_iso(_startOfToday())); setEnd(_iso(today)); }
+    else if (p === "month") { setStart(_iso(_startOfMonth())); setEnd(_iso(today)); }
+    else if (p === "year") { setStart(_iso(_startOfYear())); setEnd(_iso(today)); }
+  };
+  const doPrint = async () => {
+    try {
+      const r = await api.get("/cash/statement", { params: { start, end } });
+      const entries = r.data.entries || [];
+      if (!entries.length) { toast.error("لا توجد حركات ضمن الفترة"); return; }
+      const labelP = { day: "يومي", month: "شهري", year: "سنوي", custom: "مخصص" }[period];
+      printReport({
+        title: `كشف صندوق النقدية ${labelP} — من ${start} إلى ${end}`,
+        headers: ["التاريخ", "الرقم", "البيان", "قبض", "صرف", "الرصيد"],
+        rows: entries.map((e) => [fmtDate(e.created_at), e.number || "-", e.description, fmt(e.in), fmt(e.out), fmt(e.balance)]),
+        totals: [
+          { label: "إجمالي القبض", value: fmt(r.data.total_in) },
+          { label: "إجمالي الصرف", value: fmt(r.data.total_out) },
+          { label: "صافي الحركة", value: fmt(r.data.total_in - r.data.total_out) },
+        ],
+      });
+    } catch (e) { toast.error("فشل تحميل الكشف"); }
+  };
+  if (!data) return null;
+  return (
+    <Card className="p-4 border-r-4 border-emerald-500" data-testid="dash-cashbox">
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+        <div className="flex items-center gap-2 font-bold text-[#221340]"><Wallet size={18} className="text-emerald-600"/> صندوق النقدية</div>
+        <div className="flex gap-1 flex-wrap">
+          {[["day","يومي"],["month","شهري"],["year","سنوي"]].map(([k,l]) => (
+            <button key={k} onClick={() => apply(k)} className={`px-2.5 py-1 rounded-full text-xs border ${period===k?"bg-emerald-600 text-white border-emerald-600":"border-slate-300"}`} data-testid={`cash-period-${k}`}>{l}</button>
+          ))}
+          <Button onClick={doPrint} size="sm" variant="outline" className="text-xs h-7" data-testid="cash-print"><Printer size={12} className="ml-1"/>طباعة</Button>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2 mb-2">
+        <div><label className="text-xs text-slate-500">من</label><Input type="date" value={start} onChange={(e) => { setStart(e.target.value); setPeriod("custom"); }} className="h-8" data-testid="cash-start"/></div>
+        <div><label className="text-xs text-slate-500">إلى</label><Input type="date" value={end} onChange={(e) => { setEnd(e.target.value); setPeriod("custom"); }} className="h-8" data-testid="cash-end"/></div>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        <div className="bg-emerald-50 p-2 rounded"><div className="text-xs text-slate-500">الرصيد الحالي</div><div className="text-lg font-bold text-emerald-700 num" data-testid="cash-balance">{fmt(data.balance)}</div></div>
+        <div className="bg-green-50 p-2 rounded"><div className="text-xs text-slate-500">إجمالي المقبوضات</div><div className="text-lg font-bold text-green-700 num" data-testid="cash-in">{fmt(data.total_in)}</div></div>
+        <div className="bg-red-50 p-2 rounded"><div className="text-xs text-slate-500">إجمالي المصروفات</div><div className="text-lg font-bold text-red-700 num" data-testid="cash-out">{fmt(data.total_out)}</div></div>
+        <div className={`p-2 rounded ${data.net>=0?"bg-slate-50":"bg-red-50"}`}><div className="text-xs text-slate-500">صافي الحركة</div><div className={`text-lg font-bold num ${data.net>=0?"text-slate-700":"text-red-700"}`} data-testid="cash-net">{fmt(data.net)}</div></div>
+      </div>
+    </Card>
+  );
+}
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 
 const Stat = ({ label, value, sub, tone = "purple", testid }) => {
@@ -34,6 +100,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6" data-testid="dashboard">
+      <CashBox />
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-3">
         <Stat testid="stat-sales-today" label="مبيعات اليوم" value={fmt(d.sales_today)} tone="purple" />
         <Stat testid="stat-sales-month" label="مبيعات الشهر" value={fmt(d.sales_month)} tone="gold" />

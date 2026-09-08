@@ -308,7 +308,7 @@ async def notify(title: str, message: str, ntype: str = "info", user_id: Optiona
 ALL_PERMS = [
     "dashboard","sales","purchases","customers","suppliers","stock","categories",
     "receipts","reports","print_reports","users","settings","card_orders",
-    "delete_ops","edit_ops","cards","backup",
+    "delete_ops","edit_ops","cards","backup","expenses",
 ]
 
 class LoginIn(BaseModel):
@@ -414,6 +414,17 @@ class ReceiptIn(BaseModel):
     party_name: Optional[str] = ""
     amount: float
     description: Optional[str] = ""
+    idempotency_key: Optional[str] = None
+
+class ExpenseAccountIn(BaseModel):
+    name: str
+    notes: Optional[str] = ""
+
+class ExpenseIn(BaseModel):
+    account_id: str
+    amount: float
+    description: Optional[str] = ""
+    date: Optional[str] = None  # YYYY-MM-DD; defaults to today
     idempotency_key: Optional[str] = None
 
 class CardOrderPublicLogin(BaseModel):
@@ -1555,6 +1566,173 @@ async def create_receipt(data: ReceiptIn, user=Depends(require_perm("receipts"))
 async def list_receipts(user=Depends(require_perm("receipts"))):
     items = await db.receipts.find().sort("created_at", -1).limit(1000).to_list(1000)
     return [clean_doc(r) for r in items]
+
+
+# ================= EXPENSES =================
+@api.get("/expense-accounts")
+async def list_expense_accounts(user=Depends(require_perm("expenses"))):
+    items = await db.expense_accounts.find().sort("name", 1).to_list(500)
+    return [clean_doc(x) for x in items]
+
+@api.post("/expense-accounts")
+async def create_expense_account(data: ExpenseAccountIn, user=Depends(require_perm("expenses"))):
+    if not data.name.strip():
+        raise HTTPException(status_code=400, detail="اسم الحساب مطلوب")
+    if await db.expense_accounts.find_one({"name": data.name.strip()}):
+        raise HTTPException(status_code=400, detail="الاسم مستخدم بالفعل")
+    doc = {
+        "id": str(uuid.uuid4()), "name": data.name.strip(),
+        "notes": (data.notes or "").strip(),
+        "created_at": now_iso(), "created_by": user.get("username"),
+    }
+    await db.expense_accounts.insert_one(doc)
+    await audit_log(user, "create", "expense_account", doc["id"])
+    return clean_doc(doc)
+
+@api.delete("/expense-accounts/{acc_id}")
+async def delete_expense_account(acc_id: str, user=Depends(require_perm("expenses"))):
+    used = await db.expenses.count_documents({"account_id": acc_id, "status": {"$ne": "deleted"}})
+    if used:
+        raise HTTPException(status_code=400, detail=f"لا يمكن الحذف — الحساب مستخدم في {used} مصروف")
+    r = await db.expense_accounts.delete_one({"id": acc_id})
+    if r.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="غير موجود")
+    await audit_log(user, "delete", "expense_account", acc_id)
+    return {"ok": True}
+
+@api.get("/expenses")
+async def list_expenses(user=Depends(require_perm("expenses"))):
+    items = await db.expenses.find().sort("created_at", -1).limit(2000).to_list(2000)
+    return [clean_doc(x) for x in items]
+
+@api.post("/expenses")
+async def create_expense(data: ExpenseIn, user=Depends(require_perm("expenses"))):
+    if data.amount is None or data.amount <= 0:
+        raise HTTPException(status_code=400, detail="المبلغ غير صالح")
+    if data.idempotency_key:
+        existing = await db.expenses.find_one({"idempotency_key": data.idempotency_key})
+        if existing:
+            return clean_doc(existing)
+    acc = await db.expense_accounts.find_one({"id": data.account_id})
+    if not acc:
+        raise HTTPException(status_code=404, detail="حساب المصروف غير موجود")
+    number = await next_gwd_number()
+    when = f"{data.date}T00:00:00+00:00" if data.date else now_iso()
+    doc = {
+        "id": str(uuid.uuid4()), "number": number,
+        "account_id": data.account_id, "account_name": acc.get("name", ""),
+        "amount": float(data.amount),
+        "description": (data.description or "").strip(),
+        "user_id": user["id"], "username": user.get("username"),
+        "idempotency_key": data.idempotency_key,
+        "status": "active",
+        "created_at": when,
+    }
+    await db.expenses.insert_one(doc)
+    await audit_log(user, "create", "expense", doc["id"])
+    return clean_doc(doc)
+
+@api.delete("/expenses/{eid}")
+async def delete_expense(eid: str, user=Depends(require_perm("delete_ops"))):
+    doc = await db.expenses.find_one({"id": eid})
+    if not doc:
+        raise HTTPException(status_code=404, detail="غير موجود")
+    await db.expenses.update_one({"id": eid}, {"$set": {"status": "deleted", "deleted_at": now_iso(), "deleted_by": user.get("username")}})
+    await audit_log(user, "delete", "expense", eid)
+    return {"ok": True}
+
+
+# ================= CASH BOX =================
+@api.get("/cash/summary")
+async def cash_summary(
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    user=Depends(get_current_user),
+):
+    """Compute cash box totals from all sources:
+    IN  = cash sales (sale_type=cash) + receipt vouchers (kind=receipt)
+    OUT = payment vouchers (kind=payment) + expenses
+    Optional YYYY-MM-DD range; returns totals and net = IN - OUT.
+    A separate `balance` field returns the ALL-TIME running balance regardless
+    of the filter, so the dashboard always shows the true cash position."""
+    s_iso = f"{start}T00:00:00+00:00" if start else None
+    e_iso = f"{end}T23:59:59+00:00" if end else None
+
+    def in_range(iso: str) -> bool:
+        if s_iso and iso < s_iso: return False
+        if e_iso and iso > e_iso: return False
+        return True
+
+    sales = await db.sales.find({"status": "active", "sale_type": "cash"}).to_list(20000)
+    recs = await db.receipts.find({"status": "active"}).to_list(20000)
+    exps = await db.expenses.find({"status": "active"}).to_list(20000)
+
+    total_in_all = sum(s.get("total", 0) for s in sales) + sum(r.get("amount", 0) for r in recs if r.get("kind") == "receipt")
+    total_out_all = sum(r.get("amount", 0) for r in recs if r.get("kind") == "payment") + sum(e.get("amount", 0) for e in exps)
+    running_balance = total_in_all - total_out_all
+
+    filt_in = sum(s.get("total", 0) for s in sales if in_range(s.get("created_at", ""))) \
+              + sum(r.get("amount", 0) for r in recs if r.get("kind") == "receipt" and in_range(r.get("created_at", "")))
+    filt_out = sum(r.get("amount", 0) for r in recs if r.get("kind") == "payment" and in_range(r.get("created_at", ""))) \
+               + sum(e.get("amount", 0) for e in exps if in_range(e.get("created_at", "")))
+
+    return {
+        "range": {"start": start, "end": end},
+        "balance": running_balance,
+        "total_in": filt_in,
+        "total_out": filt_out,
+        "net": filt_in - filt_out,
+        "counts": {
+            "cash_sales": sum(1 for s in sales if in_range(s.get("created_at", ""))),
+            "receipts": sum(1 for r in recs if r.get("kind") == "receipt" and in_range(r.get("created_at", ""))),
+            "payments": sum(1 for r in recs if r.get("kind") == "payment" and in_range(r.get("created_at", ""))),
+            "expenses": sum(1 for e in exps if in_range(e.get("created_at", ""))),
+        },
+    }
+
+@api.get("/cash/statement")
+async def cash_statement(
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    user=Depends(require_perm("receipts")),
+):
+    """Returns every cash-affecting movement in the window, ordered by date."""
+    s_iso = f"{start}T00:00:00+00:00" if start else None
+    e_iso = f"{end}T23:59:59+00:00" if end else None
+    def q(base):
+        if s_iso or e_iso:
+            base["created_at"] = {}
+            if s_iso: base["created_at"]["$gte"] = s_iso
+            if e_iso: base["created_at"]["$lte"] = e_iso
+        return base
+    sales = await db.sales.find(q({"status": "active", "sale_type": "cash"})).to_list(5000)
+    recs = await db.receipts.find(q({"status": "active"})).to_list(5000)
+    exps = await db.expenses.find(q({"status": "active"})).to_list(5000)
+    entries = []
+    for s in sales:
+        entries.append({"created_at": s["created_at"], "type": "cash_sale", "number": s.get("number"),
+                        "description": f"مبيعات نقدية — {s.get('customer_name') or 'نقدي'}",
+                        "in": s.get("total", 0), "out": 0})
+    for r in recs:
+        if r.get("kind") == "receipt":
+            entries.append({"created_at": r["created_at"], "type": "receipt", "number": r.get("number"),
+                            "description": f"سند قبض — {r.get('party_name','')}",
+                            "in": r.get("amount", 0), "out": 0})
+        else:
+            entries.append({"created_at": r["created_at"], "type": "payment", "number": r.get("number"),
+                            "description": f"سند صرف — {r.get('party_name','')}",
+                            "in": 0, "out": r.get("amount", 0)})
+    for e in exps:
+        entries.append({"created_at": e["created_at"], "type": "expense", "number": e.get("number"),
+                        "description": f"مصروف — {e.get('account_name','')}" + (f" — {e.get('description')}" if e.get("description") else ""),
+                        "in": 0, "out": e.get("amount", 0)})
+    entries.sort(key=lambda x: x["created_at"])
+    running = 0.0
+    for e in entries:
+        running += (e["in"] or 0) - (e["out"] or 0)
+        e["balance"] = running
+    return {"range": {"start": start, "end": end}, "entries": entries,
+            "total_in": sum(e["in"] for e in entries), "total_out": sum(e["out"] for e in entries)}
 
 
 # ================= CARD ORDERS (PUBLIC) =================
