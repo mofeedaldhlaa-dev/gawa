@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { fmt } from "@/lib/utils";
 import { Link } from "react-router-dom";
-import { Search, Plus, FileText, Edit, KeyRound, Eye } from "lucide-react";
+import { Search, Plus, FileText, Edit, KeyRound, Eye, Power, PowerOff } from "lucide-react";
 
 function CustomerForm({ initial, onSaved, onClose }) {
   const [f, setF] = useState(initial || { name: "", phone: "", password: "", credit_limit: 0, opening_balance: 0, address: "", notes: "", status: "active", customer_type: "customer" });
@@ -145,6 +145,16 @@ export default function Customers() {
   const load = async () => setItems((await api.get("/customers")).data);
   useEffect(() => { load(); }, []);
 
+  const toggleStatus = async (c) => {
+    const goDisabled = c.status === "active";
+    if (!window.confirm(goDisabled ? `تعطيل حساب العميل "${c.name}"؟ لن يتمكن من تسجيل الدخول أو الشراء.` : `تفعيل حساب العميل "${c.name}"؟`)) return;
+    try {
+      const r = await api.post(`/customers/${c.id}/toggle-status`);
+      toast.success(r.data?.status === "disabled" ? "تم تعطيل الحساب" : "تم تفعيل الحساب");
+      load();
+    } catch (e) { toast.error(errText(e)); }
+  };
+
   const filtered = items.filter((c) => (!q || c.name.includes(q) || (c.phone || "").includes(q)) && (typeFilter === "all" || (c.customer_type || "customer") === typeFilter));
 
   return (
@@ -181,42 +191,45 @@ export default function Customers() {
             <thead className="bg-slate-50 text-slate-600">
               <tr className="text-right">
                 <th className="p-3">الاسم</th><th className="p-3">النوع</th><th className="p-3">الهاتف</th><th className="p-3">السقف</th>
-                <th className="p-3">المديونية</th><th className="p-3">المتاح</th><th className="p-3">كلمة المرور</th><th className="p-3"></th>
+                <th className="p-3">المديونية</th><th className="p-3">المتاح</th><th className="p-3">الحالة</th><th className="p-3">كلمة المرور</th><th className="p-3"></th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((c) => (
-                <tr key={c.id} className="border-t border-slate-100" data-testid={`cust-row-${c.id}`}>
+                <tr key={c.id} className={`border-t border-slate-100 ${c.status==='disabled' ? 'opacity-60 bg-red-50/30' : ''}`} data-testid={`cust-row-${c.id}`}>
                   <td className="p-3 font-medium">{c.name}</td>
                   <td className="p-3"><span className={`text-xs px-2 py-0.5 rounded-full ${(c.customer_type||'customer')==='pos'?'bg-purple-100 text-purple-700':'bg-blue-100 text-blue-700'}`}>{(c.customer_type||'customer')==='pos'?'نقطة بيع':'عميل'}</span></td>
                   <td className="p-3">{c.phone}</td>
                   <td className="p-3 num">{fmt(c.credit_limit)}</td>
                   <td className="p-3 num">{fmt(c.balance)}</td>
                   <td className="p-3 num text-green-700">{fmt(Math.max(0, (c.credit_limit || 0) - (c.balance || 0)))}</td>
+                  <td className="p-3"><span className={`text-xs px-2 py-0.5 rounded-full ${c.status==='active'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}`}>{c.status==='active'?'نشط':'معطل'}</span></td>
                   <td className="p-3"><RevealButton id={c.id}/></td>
                   <td className="p-3 flex gap-2">
                     <Link to={`/customers/${c.id}`}><Button size="sm" variant="outline" data-testid={`cust-stmt-${c.id}`}><FileText size={14} /></Button></Link>
                     <Button size="sm" variant="outline" onClick={() => { setEdit(c); setOpen(true); }} data-testid={`cust-edit-${c.id}`}><Edit size={14} /></Button>
                     <Button size="sm" variant="outline" onClick={() => setPwdCustomer(c)} data-testid={`cust-pwd-${c.id}`}><KeyRound size={14} /></Button>
+                    <Button size="sm" variant="outline" onClick={() => toggleStatus(c)} data-testid={`cust-toggle-${c.id}`} title={c.status==='active'?'تعطيل':'تفعيل'}>{c.status==='active' ? <PowerOff size={14} className="text-red-600"/> : <Power size={14} className="text-green-600"/>}</Button>
                   </td>
                 </tr>
               ))}
-              {filtered.length === 0 && <tr><td colSpan={8} className="p-6 text-center text-slate-400">لا يوجد عملاء</td></tr>}
+              {filtered.length === 0 && <tr><td colSpan={9} className="p-6 text-center text-slate-400">لا يوجد عملاء</td></tr>}
             </tbody>
           </table>
         </div>
         <div className="md:hidden divide-y">
           {filtered.map((c) => (
-            <div key={c.id} className="p-3" data-testid={`cust-card-${c.id}`}>
+            <div key={c.id} className={`p-3 ${c.status==='disabled'?'opacity-60 bg-red-50/30':''}`} data-testid={`cust-card-${c.id}`}>
               <div className="flex justify-between items-start gap-2">
                 <div className="min-w-0">
-                  <div className="font-bold truncate">{c.name} <span className="text-xs text-slate-500">({(c.customer_type||'customer')==='pos'?'نقطة بيع':'عميل'})</span></div>
+                  <div className="font-bold truncate flex items-center gap-2">{c.name} <span className="text-xs text-slate-500">({(c.customer_type||'customer')==='pos'?'نقطة بيع':'عميل'})</span>{c.status==='disabled' && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">معطل</span>}</div>
                   <div className="text-xs text-slate-500 truncate">{c.phone}</div>
                 </div>
                 <div className="flex gap-1 shrink-0">
                   <Link to={`/customers/${c.id}`}><Button size="sm" variant="outline"><FileText size={14} /></Button></Link>
                   <Button size="sm" variant="outline" onClick={() => { setEdit(c); setOpen(true); }}><Edit size={14} /></Button>
                   <Button size="sm" variant="outline" onClick={() => setPwdCustomer(c)}><KeyRound size={14} /></Button>
+                  <Button size="sm" variant="outline" onClick={() => toggleStatus(c)} data-testid={`cust-toggle-m-${c.id}`}>{c.status==='active' ? <PowerOff size={14} className="text-red-600"/> : <Power size={14} className="text-green-600"/>}</Button>
                 </div>
               </div>
               <div className="grid grid-cols-3 gap-2 mt-2 text-xs">

@@ -524,6 +524,18 @@ async def disable_user(uid: str, user=Depends(require_perm("users"))):
     await audit_log(user, "disable", "user", uid)
     return {"ok": True}
 
+@api.post("/users/{uid}/toggle-status")
+async def toggle_user_status(uid: str, user=Depends(require_perm("users"))):
+    if uid == user["id"]:
+        raise HTTPException(status_code=400, detail="لا يمكن تعطيل حسابك")
+    target = await db.users.find_one({"id": uid})
+    if not target:
+        raise HTTPException(status_code=404, detail="المستخدم غير موجود")
+    new_status = "disabled" if target.get("status") == "active" else "active"
+    await db.users.update_one({"id": uid}, {"$set": {"status": new_status}})
+    await audit_log(user, f"set_status:{new_status}", "user", uid)
+    return {"ok": True, "status": new_status}
+
 @api.get("/users/permissions/list")
 async def perms_list(user=Depends(get_current_user)):
     return ALL_PERMS
@@ -580,6 +592,16 @@ async def update_customer(cid: str, data: CustomerIn, user=Depends(require_perm(
 async def disable_customer(cid: str, user=Depends(require_perm("customers"))):
     await db.customers.update_one({"id": cid}, {"$set": {"status": "disabled"}})
     return {"ok": True}
+
+@api.post("/customers/{cid}/toggle-status")
+async def toggle_customer_status(cid: str, user=Depends(require_perm("customers"))):
+    target = await db.customers.find_one({"id": cid})
+    if not target:
+        raise HTTPException(status_code=404, detail="العميل غير موجود")
+    new_status = "disabled" if target.get("status") == "active" else "active"
+    await db.customers.update_one({"id": cid}, {"$set": {"status": new_status}})
+    await audit_log(user, f"set_status:{new_status}", "customer", cid)
+    return {"ok": True, "status": new_status}
 
 @api.get("/customers/{cid}/statement")
 async def customer_statement(cid: str, user=Depends(require_perm("customers"))):
@@ -1598,6 +1620,8 @@ async def public_order(data: CardOrderRequest):
         raise HTTPException(status_code=404, detail="لاتمتلك حساب بهذا الرقم، عليك بانشاء حساب أولاً")
     if customer.get("password") != data.password:
         raise HTTPException(status_code=401, detail="كلمة السر غير صحيحة")
+    if customer.get("status") == "disabled":
+        raise HTTPException(status_code=403, detail="الحساب معطل")
     cat = await db.card_categories.find_one({"id": data.category_id})
     if not cat: raise HTTPException(status_code=404, detail="الفئة غير موجودة")
     # Pick price according to customer type (POS vs regular customer)
