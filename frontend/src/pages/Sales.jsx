@@ -104,6 +104,12 @@ export default function Sales() {
             <div className="space-y-2 text-sm">
               <div className="flex justify-between"><span>التاريخ</span><span>{fmtDate(viewing.created_at)}</span></div>
               <div className="flex justify-between"><span>العميل</span><span>{viewing.customer_name || "نقدي"}</span></div>
+              {viewing.recipient_phone && (
+                <div className="flex justify-between bg-amber-50 border border-amber-200 rounded px-2 py-1" data-testid="sale-view-recipient">
+                  <span className="text-amber-800">📤 المرسل إلى</span>
+                  <span className="font-mono font-bold text-amber-900">{viewing.recipient_phone}</span>
+                </div>
+              )}
               <div className="border-t pt-2">
                 {(viewing.items || []).map((it, i) => (
                   <div key={i} className="flex justify-between py-1"><span>{it.category_name} × {it.quantity}</span><span className="num">{fmt(it.total)}</span></div>

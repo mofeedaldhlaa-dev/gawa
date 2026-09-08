@@ -35,6 +35,7 @@ export default function PublicOrder() {
   const [selectedCat, setSelectedCat] = useState(null);
   const [sendToOther, setSendToOther] = useState(false);
   const [recipientPhone, setRecipientPhone] = useState("");
+  const [recipientName, setRecipientName] = useState("");
   const [pickingContact, setPickingContact] = useState(false);
   const [loginError, setLoginError] = useState("");
   const [deviceMismatch, setDeviceMismatch] = useState(false);
@@ -102,10 +103,12 @@ export default function PublicOrder() {
       if (contacts && contacts.length > 0) {
         const c = contacts[0];
         const tel = Array.isArray(c.tel) ? c.tel[0] : c.tel;
+        const nm = Array.isArray(c.name) ? c.name[0] : c.name;
         if (tel) {
           const digits = String(tel).replace(/[^0-9+]/g, "");
           setRecipientPhone(digits);
-          toast.success(`تم اختيار: ${c.name?.[0] || digits}`);
+          setRecipientName(nm || "");
+          toast.success(`تم اختيار: ${nm || digits}`);
         } else {
           toast.error("جهة الاتصال المختارة لا تحتوي على رقم هاتف");
         }
@@ -150,10 +153,12 @@ export default function PublicOrder() {
       const payload = { phone, password, category_id, quantity: Number(quantity) };
       if (sendToOther && recipientPhone) payload.recipient_phone = recipientPhone.replace(/[^0-9+]/g, "");
       const r = await api.post("/public/card-order/request", payload);
-      setResult(r.data);
+      // Attach recipient_name locally for display (backend doesn't need it)
+      const dataWithName = { ...r.data, recipient_name: sendToOther ? recipientName : "" };
+      setResult(dataWithName);
       const cat = cats.find((c) => c.id === category_id);
       setSelectedCat(cat);
-      toast.success(payload.recipient_phone ? `تم تنفيذ الطلب — تحويل إلى ${payload.recipient_phone}` : "تم تنفيذ طلبك بنجاح");
+      toast.success(payload.recipient_phone ? `تم تنفيذ الطلب — تحويل إلى ${recipientName || payload.recipient_phone}` : "تم تنفيذ طلبك بنجاح");
       // Auto-open the SMS app when a recipient was chosen — a click is still needed to send.
       if (payload.recipient_phone && r.data?.cards?.length) {
         setTimeout(() => sendCardSms(payload.recipient_phone, r.data.cards, cat?.name), 600);
@@ -316,11 +321,17 @@ export default function PublicOrder() {
               {sendToOther && (
                 <div className="space-y-2 pt-1">
                   <div className="flex gap-2">
-                    <Input type="tel" inputMode="tel" placeholder="أدخل رقم الهاتف المستلم" value={recipientPhone} onChange={(e) => setRecipientPhone(e.target.value)} data-testid="po-recipient-phone" className="flex-1"/>
+                    <Input type="tel" inputMode="tel" placeholder="أدخل رقم الهاتف المستلم" value={recipientPhone} onChange={(e) => { setRecipientPhone(e.target.value); setRecipientName(""); }} data-testid="po-recipient-phone" className="flex-1"/>
                     <Button type="button" onClick={pickContact} disabled={pickingContact} variant="outline" className="shrink-0 border-[#452480] text-[#452480] hover:bg-[#452480]/10" data-testid="po-pick-contact">
                       <ContactRound size={16} className="ml-1"/> جهات الاتصال
                     </Button>
                   </div>
+                  {recipientName && (
+                    <div className="flex items-center gap-2 text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 rounded px-2 py-1" data-testid="po-recipient-name">
+                      <ContactRound size={14}/>
+                      <span>الاسم: <strong>{recipientName}</strong></span>
+                    </div>
+                  )}
                   {!contactPickerSupported && (
                     <div className="text-[11px] text-slate-500">
                       اختيار جهات الاتصال متاح فقط في متصفح Chrome على أندرويد. يمكنك إدخال الرقم يدوياً.
@@ -362,6 +373,12 @@ export default function PublicOrder() {
                           <div><div className="text-slate-500">الكمية</div><div className="num font-bold">{o.quantity}</div></div>
                           <div><div className="text-slate-500">الإجمالي</div><div className="num font-bold">{fmt(o.total)}</div></div>
                         </div>
+                        {o.recipient_phone && (
+                          <div className="mt-2 flex items-center gap-2 text-xs bg-amber-50 border border-amber-200 rounded px-2 py-1 text-amber-900" data-testid={`po-order-recipient-${o.id}`}>
+                            <Send size={12} className="text-amber-700"/>
+                            <span>📤 المرسل إلى: <span className="font-mono font-bold">{o.recipient_phone}</span></span>
+                          </div>
+                        )}
                         {o.cards?.length > 0 && (
                           <div className="mt-2 pt-2 border-t">
                             <div className="text-slate-500 text-xs mb-1">الكروت:</div>
@@ -393,9 +410,16 @@ export default function PublicOrder() {
             </div>
             {selectedCat && <div className="text-center text-sm bg-slate-50 py-2 rounded">فئة الكرت: <span className="font-bold gold-text">{selectedCat.name}</span></div>}
             {result.recipient_phone && (
-              <div className="text-center text-sm bg-amber-50 border border-amber-200 py-2 rounded flex items-center justify-center gap-2" data-testid="po-result-recipient">
-                <Send size={14} className="text-amber-700"/>
-                <span>تم التحويل إلى: <span className="font-mono font-bold text-amber-800">{result.recipient_phone}</span></span>
+              <div className="text-center text-sm bg-amber-50 border border-amber-200 py-2 rounded flex flex-col items-center gap-1" data-testid="po-result-recipient">
+                <div className="flex items-center gap-2">
+                  <Send size={14} className="text-amber-700"/>
+                  <span>تم التحويل إلى: <span className="font-mono font-bold text-amber-800">{result.recipient_phone}</span></span>
+                </div>
+                {result.recipient_name && (
+                  <div className="text-xs text-amber-900 flex items-center gap-1" data-testid="po-result-recipient-name">
+                    <ContactRound size={12}/> {result.recipient_name}
+                  </div>
+                )}
               </div>
             )}
             {result.recipient_phone && result.cards?.length > 0 && (
@@ -424,7 +448,7 @@ export default function PublicOrder() {
               <div className="text-slate-500">المديونية بعد العملية</div>
               <div className="text-2xl font-bold num">{fmt(result.balance_after)}</div>
             </div>
-            <Button onClick={() => { setResult(null); setCategoryId(""); setQuantity(1); setSelectedCat(null); setSendToOther(false); setRecipientPhone(""); }} variant="outline" className="w-full">طلب جديد</Button>
+            <Button onClick={() => { setResult(null); setCategoryId(""); setQuantity(1); setSelectedCat(null); setSendToOther(false); setRecipientPhone(""); setRecipientName(""); }} variant="outline" className="w-full">طلب جديد</Button>
           </div>
         )}
       </Card>

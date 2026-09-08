@@ -141,6 +141,7 @@ export const printSaleInvoice = ({ sale, customer, username }) => {
       <div class="info-row"><span class="lbl">اسم العميل</span><span class="val">${sale.customer_name || "-"}</span></div>
       <div class="info-row"><span class="lbl">رقم الهاتف</span><span class="val">${customer?.phone || "-"}</span></div>
       <div class="info-row"><span class="lbl">نوع الحساب</span><span class="val">${(customer?.customer_type || "customer") === "pos" ? "نقطة بيع" : "عميل"}</span></div>
+      ${sale.recipient_phone ? `<div class="info-row" style="grid-column:1/-1;background:#fff8e1;border-color:#f5c451"><span class="lbl">📤 المرسل إلى</span><span class="val" style="font-family:monospace;font-weight:bold;color:#7a4b00">${sale.recipient_phone}</span></div>` : ""}
       <div class="info-row"><span class="lbl">المستخدم</span><span class="val">${sale.username || "-"}</span></div>
     </div>
     <table>
@@ -269,6 +270,7 @@ export const printPublicOrder = ({ order, customer, company = "شبكة جواد
       <div class="info-row"><span class="lbl">اسم الحساب</span><span class="val">${order.customer_name || customer?.name || "-"}</span></div>
       <div class="info-row"><span class="lbl">رقم الهاتف</span><span class="val">${order.phone || customer?.phone || "-"}</span></div>
       <div class="info-row"><span class="lbl">نوع الحساب</span><span class="val">${(customer?.customer_type || "customer") === "pos" ? "نقطة بيع" : "عميل"}</span></div>
+      ${order.recipient_phone ? `<div class="info-row" style="grid-column:1/-1;background:#fff8e1;border-color:#f5c451"><span class="lbl">📤 المرسل إلى</span><span class="val" style="font-family:monospace;font-weight:bold;color:#7a4b00">${order.recipient_phone}</span></div>` : ""}
     </div>
     <table>
       <thead><tr>
