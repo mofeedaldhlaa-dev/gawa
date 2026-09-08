@@ -1783,6 +1783,26 @@ async def public_my_orders(data: CardOrderHistoryIn):
     docs = await db.orders.find(query).sort("created_at", -1).limit(500).to_list(500)
     return [clean_doc(o) for o in docs]
 
+class StatementIn(BaseModel):
+    phone: str
+    password: str
+
+@api.post("/public/card-order/statement")
+async def public_customer_statement(data: StatementIn):
+    """Return customer + ledger entries for the customer portal statement print.
+    Auth via phone+password."""
+    customer = await db.customers.find_one({"phone": data.phone})
+    if not customer:
+        raise HTTPException(status_code=404, detail="لاتمتلك حساب بهذا الرقم")
+    if customer.get("password") != data.password:
+        raise HTTPException(status_code=401, detail="كلمة السر غير صحيحة")
+    if customer.get("status") == "disabled":
+        raise HTTPException(status_code=403, detail="الحساب معطل")
+    entries = await db.ledger.find({"party_type": "customer", "party_id": customer["id"]}).sort("created_at", 1).to_list(10000)
+    c = clean_doc(customer)
+    c.pop("password", None)
+    return {"customer": c, "entries": [clean_doc(e) for e in entries]}
+
 @api.get("/orders")
 async def list_orders(user=Depends(require_perm("card_orders"))):
     items = await db.orders.find().sort("created_at", -1).limit(1000).to_list(1000)

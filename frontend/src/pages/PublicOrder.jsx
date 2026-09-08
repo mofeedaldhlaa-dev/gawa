@@ -8,8 +8,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { fmt, fmtDate, openWhatsApp, openSMS, phoneFingerprint } from "@/lib/utils";
+import { printStatement } from "@/lib/print";
 import { printPublicOrder } from "@/lib/print";
-import { Wifi, CheckCircle, Copy, KeyRound, Phone, Ban, AlertCircle, Printer, History, Search, ContactRound, Send, MessageSquare } from "lucide-react";
+import { Wifi, CheckCircle, Copy, KeyRound, Phone, Ban, AlertCircle, Printer, History, Search, ContactRound, Send, MessageSquare, FileText } from "lucide-react";
 
 const ADMIN_WHATSAPP = "784225716";
 
@@ -79,6 +80,20 @@ export default function PublicOrder() {
   const [endDate, setEndDate] = useState("");
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [printingStmt, setPrintingStmt] = useState(false);
+
+  const printAccountStatement = async () => {
+    setPrintingStmt(true);
+    try {
+      const r = await api.post("/public/card-order/statement", { phone, password });
+      printStatement({
+        customer: r.data.customer,
+        entries: r.data.entries,
+        username: r.data.customer?.name || "",
+      });
+    } catch (e) { toast.error(errText(e)); }
+    setPrintingStmt(false);
+  };
 
   const contactCSForDeviceChange = () => {
     const now = new Date();
@@ -328,6 +343,19 @@ export default function PublicOrder() {
                 <div><div className="text-slate-500">السقف</div><div className="num font-bold">{fmt(customer.credit_limit)}</div></div>
                 <div><div className="text-slate-500">المديونية</div><div className="num font-bold">{fmt(customer.balance)}</div></div>
                 <div><div className="text-slate-500">المتاح</div><div className="num font-bold text-green-600">{fmt(customer.available)}</div></div>
+              </div>
+              <div className="mt-2 pt-2 border-t border-slate-200">
+                <Button
+                  type="button"
+                  onClick={printAccountStatement}
+                  disabled={printingStmt}
+                  variant="outline"
+                  size="sm"
+                  className="w-full border-[#452480] text-[#452480] hover:bg-[#452480]/10"
+                  data-testid="po-print-statement"
+                >
+                  <FileText size={14} className="ml-1"/> {printingStmt ? "جاري التحضير..." : "طباعة كشف الحساب"}
+                </Button>
               </div>
             </Card>
             <div><Label>الفئة</Label>

@@ -18,23 +18,25 @@ file/media storage.
 ## Implemented (recent)
 - Cloud backup daily + email download link
 - Login by email OR username (case-insensitive)
-- Enable/Disable accounts (users + customers) with 403 enforcement
+- Enable/Disable accounts (users + customers) — 403 everywhere
 - Disabled account UX (portal banner + WhatsApp CS button + statement banner)
 - Admin management (role radio, hard delete with last-admin + self safety)
-- Send card to another phone from card-order screen (Contact Picker API)
-- Auto SMS delivery (client-side, `sms:` URI) + manual retry button
-- Recipient info visible everywhere: printed invoices, sale view dialog, previous-orders history, portal result screen
+- Send card to another phone + Contact Picker + auto SMS delivery
+- Recipient info in all invoices, orders, sale view dialog, and history cards
 - Contact name shown under phone in card-order screen
-- **2026-02: Remember Me in customer portal**
-  - Checkbox "حفظ رقم الهاتف وكلمة المرور" on `/order` login form
-  - Credentials stored in localStorage as `jwd_portal_saved` (base64-obfuscated JSON)
-  - Auto-load on mount when previously saved
-  - Explicit "مسح الحساب من هذا الجهاز" button to clear + reset form
-  - Un-checking the box on next login clears stored credentials automatically
+- Remember Me + auto-fill on customer portal (localStorage base64) with explicit clear button
+- **2026-02: Print account statement from customer portal**
+  - New public endpoint `POST /api/public/card-order/statement` — phone+password auth, returns customer + ledger entries; password removed from response; enforces disabled=403
+  - Reuses existing `printStatement` A4 template — header, customer info, ledger table, totals, footer
+  - Purple outlined button "طباعة كشف الحساب" placed inside customer info card, shown right after login
+  - Loading state and toast error handling
 
 ## API cheatsheet
 - `POST /api/auth/login` — `{username|email, password}`
+- `POST /api/public/card-order/login`
 - `POST /api/public/card-order/request` — `{phone, password, category_id, quantity, recipient_phone?}`
+- `POST /api/public/card-order/statement` — `{phone, password}` → `{customer, entries[]}`
+- `POST /api/public/card-order/my-orders` — history
 - `POST /api/users/{uid}/toggle-status` • `DELETE /api/users/{uid}/permanent`
 - `POST /api/customers/{cid}/toggle-status`
 - `POST /api/backup/run-now` • `GET /api/backup/latest` • `POST /api/backup/restore-latest`
@@ -43,5 +45,5 @@ file/media storage.
 - MongoDB Atlas migration BLOCKED (Atlas IP firewall). Replaced by cloud backup.
 - P0: Biometric login (WebAuthn/Passkeys) — deferred
 - P2: Separate deployment for `/order` vs admin
-- P2: Refactor server.py (~2500 lines) into `routers/`
+- P2: Refactor server.py (~2540 lines) into `routers/`
 - Automatic (Twilio) SMS — deferred; user chose free client-side option
