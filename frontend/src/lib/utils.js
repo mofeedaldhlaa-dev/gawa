@@ -83,6 +83,18 @@ export const openWhatsApp = (phone, text) => {
   window.open(`https://wa.me/${n}?text=${encodeURIComponent(text)}`, "_blank");
 };
 
+export const openSMS = (phone, text) => {
+  if (!phone) return;
+  let n = String(phone).replace(/[^0-9+]/g, "");
+  if (n.startsWith("00")) n = "+" + n.slice(2);
+  const body = encodeURIComponent(text || "");
+  // iOS uses '&', Android uses '?'. Modern browsers accept '?body='. Use it.
+  const href = `sms:${n}?body=${body}`;
+  // Use location.href to invoke the OS SMS app (window.open often blocks sms: on mobile).
+  try { window.location.href = href; }
+  catch { window.open(href, "_self"); }
+};
+
 export const buildInvoiceMessage = ({ company, number, kind, details, amount, discount, total, paid, remaining, balance_after }) => {
   const parts = [
     `من ${company}`,

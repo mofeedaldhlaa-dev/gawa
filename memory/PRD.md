@@ -16,23 +16,27 @@ file/media storage.
 - Scheduler: Emergent platform crons (`.emergent/crons.yml`)
 
 ## Implemented (recent)
-- 2026-02: **Automated daily cloud backup + email** (`/api/backup/*`, `/api/cron/daily-backup`)
-- 2026-02: **Login by email or username** (case-insensitive, admin-first)
-- 2026-02: **User email field** in Users management
-- 2026-02: **Enable/Disable accounts** (users + customers) with 403 enforcement everywhere
-- 2026-02: **Disabled account UX** (portal banner + CS WhatsApp button + statement banner)
-- 2026-02: **Admin management** (role radio, hard delete `/api/users/{uid}/permanent` with last-admin + self safety)
-- 2026-02: **Send card to another phone (Card order screen)**
-  - Backend: `CardOrderRequest.recipient_phone` optional; stored on `orders`, `sales.recipient_phone`, `card_order_attempts`; validated (min 6 digits/+); ignored when equals sender phone
-  - Frontend: checkbox "إرسال الكرت لرقم آخر" + tel input + "جهات الاتصال" button using Web Contact Picker API (`navigator.contacts.select`) with graceful fallback message for non-supporting browsers
-  - Result screen shows an amber banner "تم التحويل إلى: <number>"
-  - Notifications for admin include the recipient phone
+- Cloud backup daily + email download link (`/api/backup/*`, `/api/cron/daily-backup`)
+- Login by email OR username (case-insensitive)
+- User email field in Users management
+- Enable/Disable accounts (users + customers) with 403 enforcement
+- Disabled account UX (portal banner + WhatsApp CS button + statement banner)
+- Admin management (role radio, hard delete with last-admin + self safety)
+- **Send card to another phone from card-order screen**
+  - Backend: `CardOrderRequest.recipient_phone` optional, stored on orders/sales/attempts
+  - Frontend: checkbox + tel input + "جهات الاتصال" (Web Contact Picker API)
+- **2026-02: SMS delivery for cards (free, client-side)**
+  - `openSMS(phone, body)` helper in `lib/utils.js` uses `sms:<phone>?body=<encoded>`
+  - After a successful order with `recipient_phone`, the device SMS app is auto-opened with the card number(s) pre-filled (one tap to send from the customer's own SIM)
+  - Manual blue "إرسال الكرت رسالة نصية" button on result screen for fallback / retry
+  - Message body: greeting + sender name + card category + card numbers + brand footer
 
 ## Deferred / Alternatives
-- MongoDB Atlas migration BLOCKED (Atlas IP firewall). Replaced by cloud backup strategy.
+- MongoDB Atlas migration BLOCKED (Atlas IP firewall). Replaced by cloud backup.
 - P0: Biometric login (WebAuthn/Passkeys) — deferred
 - P2: Separate deployment for `/order` vs admin
 - P2: Refactor server.py (~2500 lines) into `routers/`
+- Automatic (Twilio) SMS — deferred; user chose free client-side option
 
 ## API cheatsheet
 - `POST /api/auth/login` — `{username|email, password}`

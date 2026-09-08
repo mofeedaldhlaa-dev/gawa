@@ -7,9 +7,9 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { fmt, fmtDate, openWhatsApp, phoneFingerprint } from "@/lib/utils";
+import { fmt, fmtDate, openWhatsApp, openSMS, phoneFingerprint } from "@/lib/utils";
 import { printPublicOrder } from "@/lib/print";
-import { Wifi, CheckCircle, Copy, KeyRound, Phone, Ban, AlertCircle, Printer, History, Search, ContactRound, Send } from "lucide-react";
+import { Wifi, CheckCircle, Copy, KeyRound, Phone, Ban, AlertCircle, Printer, History, Search, ContactRound, Send, MessageSquare } from "lucide-react";
 
 const ADMIN_WHATSAPP = "784225716";
 
@@ -118,6 +118,26 @@ export default function PublicOrder() {
     setPickingContact(false);
   };
 
+  const buildCardSmsBody = (cards, catName, senderName) => {
+    const lines = [];
+    lines.push(`مرحباً،`);
+    if (senderName) lines.push(`أرسل لك ${senderName} كرت شحن:`);
+    else lines.push(`إليك تفاصيل كرت الشحن:`);
+    if (catName) lines.push(`الفئة: ${catName}`);
+    if (cards && cards.length) {
+      lines.push(cards.length === 1 ? `رقم الكرت:` : `أرقام الكروت:`);
+      cards.forEach((c) => lines.push(c));
+    }
+    lines.push(``);
+    lines.push(`— شبكة جواد نت اللاسلكية`);
+    return lines.join("\n");
+  };
+
+  const sendCardSms = (recipient, cards, catName) => {
+    const body = buildCardSmsBody(cards, catName, customer?.name);
+    openSMS(recipient, body);
+  };
+
   const request = async () => {
     if (!category_id) { toast.error("اختر الفئة"); return; }
     if (sendToOther) {
@@ -131,8 +151,13 @@ export default function PublicOrder() {
       if (sendToOther && recipientPhone) payload.recipient_phone = recipientPhone.replace(/[^0-9+]/g, "");
       const r = await api.post("/public/card-order/request", payload);
       setResult(r.data);
-      setSelectedCat(cats.find((c) => c.id === category_id));
+      const cat = cats.find((c) => c.id === category_id);
+      setSelectedCat(cat);
       toast.success(payload.recipient_phone ? `تم تنفيذ الطلب — تحويل إلى ${payload.recipient_phone}` : "تم تنفيذ طلبك بنجاح");
+      // Auto-open the SMS app when a recipient was chosen — a click is still needed to send.
+      if (payload.recipient_phone && r.data?.cards?.length) {
+        setTimeout(() => sendCardSms(payload.recipient_phone, r.data.cards, cat?.name), 600);
+      }
     } catch (e) { toast.error(errText(e)); }
     setLoading(false);
   };
@@ -372,6 +397,15 @@ export default function PublicOrder() {
                 <Send size={14} className="text-amber-700"/>
                 <span>تم التحويل إلى: <span className="font-mono font-bold text-amber-800">{result.recipient_phone}</span></span>
               </div>
+            )}
+            {result.recipient_phone && result.cards?.length > 0 && (
+              <Button
+                onClick={() => sendCardSms(result.recipient_phone, result.cards, selectedCat?.name)}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                data-testid="po-send-sms"
+              >
+                <MessageSquare size={16} className="ml-1"/> إرسال الكرت رسالة نصية إلى {result.recipient_phone}
+              </Button>
             )}
             {result.cards?.length > 0 && (
               <Card className="p-3 bg-green-50">
