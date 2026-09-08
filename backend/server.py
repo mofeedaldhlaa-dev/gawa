@@ -769,6 +769,7 @@ async def add_cards_numbers(data: CardsAddNumbersIn, user=Depends(require_perm("
             duplicates.append(n); continue
         valid.append(n)
     docs = []
+    op_ts = now_iso()
     for n in valid:
         docs.append({
             "id": str(uuid.uuid4()),
@@ -777,11 +778,22 @@ async def add_cards_numbers(data: CardsAddNumbersIn, user=Depends(require_perm("
             "category_name": cat.get("name"),
             "status": "available",
             "type": "numbered",
-            "created_at": now_iso(),
+            "created_at": op_ts,
             "created_by": user.get("username"),
         })
     if docs:
         await db.cards.insert_many(docs)
+        await db.stock_ops.insert_one({
+            "id": str(uuid.uuid4()),
+            "category_id": data.category_id,
+            "category_name": cat.get("name"),
+            "kind": "add_numbered",
+            "quantity": len(docs),
+            "description": f"إضافة {len(docs)} كرت مرقم بدون فاتورة مشتريات",
+            "user_id": user.get("id"),
+            "username": user.get("username"),
+            "created_at": op_ts,
+        })
     await audit_log(user, "add_cards", "cards", data.category_id, None, {"added": len(docs)})
     return {"added": len(docs), "duplicates": duplicates, "invalid": invalid}
 
@@ -803,6 +815,17 @@ async def add_cards_qty(data: CardsAddQtyIn, user=Depends(require_perm("cards"))
             "used": 0,
             "created_at": now_iso(),
         })
+    await db.stock_ops.insert_one({
+        "id": str(uuid.uuid4()),
+        "category_id": data.category_id,
+        "category_name": cat.get("name"),
+        "kind": "add_quantity",
+        "quantity": int(data.quantity),
+        "description": f"إضافة {data.quantity} كرت (كمية) بدون فاتورة مشتريات",
+        "user_id": user.get("id"),
+        "username": user.get("username"),
+        "created_at": now_iso(),
+    })
     return {"ok": True, "added": data.quantity}
 
 @api.get("/cards/search/{number}")
@@ -1947,8 +1970,30 @@ async def report_item_movement(
                     "description": f"مبيعات — {s.get('customer_name','') or 'نقدي'}",
                     "in": 0, "out": it.get("quantity", 0),
                 })
-    # 3) Direct card additions (numbered) — count as "in"
-    # Sales/purchases already cover numbered stock changes, so skip separate cards feed.
+    # 3) Direct card additions (numbered + quantity) — count as "in"
+    async for op in db.stock_ops.find({"category_id": category_id}):
+        entries.append({
+            "created_at": op.get("created_at",""),
+            "type": op.get("kind","add"), "number": "-",
+            "description": op.get("description") or "إضافة مخزون بدون فاتورة",
+            "in": op.get("quantity", 0), "out": 0,
+        })
+    # 4) Legacy cards without stock_ops entry — one row per legacy insert date
+    # Detect legacy numbered cards not covered by stock_ops (cards created before we started logging)
+    logged_dates = set()
+    async for op in db.stock_ops.find({"category_id": category_id, "kind": "add_numbered"}):
+        logged_dates.add(op.get("created_at",""))
+    legacy_by_date: Dict[str, int] = {}
+    async for c in db.cards.find({"category_id": category_id}):
+        ca = c.get("created_at","")
+        if ca and ca not in logged_dates:
+            legacy_by_date[ca] = legacy_by_date.get(ca, 0) + 1
+    for dt, qty in legacy_by_date.items():
+        entries.append({
+            "created_at": dt, "type": "add_numbered_legacy", "number": "-",
+            "description": f"إضافة {qty} كرت مرقم (سجل سابق)",
+            "in": qty, "out": 0,
+        })
 
     entries.sort(key=lambda x: x.get("created_at",""))
     running = 0.0
@@ -1978,6 +2023,243 @@ async def report_item_movement(
         "total_in": total_in, "total_out": total_out,
         "entries": filtered,
     }
+
+
+# ================= CURRENCIES =================
+class CurrencyIn(BaseModel):
+    name: str
+    symbol: str
+    rate_to_yer: float  # 1 unit of this currency = X YER
+    active: Optional[bool] = True
+
+@api.get("/currencies")
+async def list_currencies(user=Depends(get_current_user)):
+    items = await db.currencies.find().to_list(200)
+    return [clean_doc(c) for c in items]
+
+@api.post("/currencies")
+async def create_currency(data: CurrencyIn, user=Depends(require_perm("settings"))):
+    if data.rate_to_yer <= 0:
+        raise HTTPException(status_code=400, detail="سعر الصرف غير صالح")
+    dup = await db.currencies.find_one({"symbol": data.symbol})
+    if dup: raise HTTPException(status_code=400, detail="العملة موجودة مسبقاً")
+    doc = {
+        "id": str(uuid.uuid4()), "name": data.name.strip(),
+        "symbol": data.symbol.strip(), "rate_to_yer": float(data.rate_to_yer),
+        "active": bool(data.active), "created_at": now_iso(),
+        "user_id": user["id"],
+    }
+    await db.currencies.insert_one(doc)
+    return clean_doc(doc)
+
+@api.put("/currencies/{cid}")
+async def update_currency(cid: str, data: CurrencyIn, user=Depends(require_perm("settings"))):
+    if data.rate_to_yer <= 0:
+        raise HTTPException(status_code=400, detail="سعر الصرف غير صالح")
+    await db.currencies.update_one({"id": cid}, {"$set": {
+        "name": data.name.strip(), "symbol": data.symbol.strip(),
+        "rate_to_yer": float(data.rate_to_yer), "active": bool(data.active),
+        "updated_at": now_iso(),
+    }})
+    return clean_doc(await db.currencies.find_one({"id": cid}))
+
+@api.delete("/currencies/{cid}")
+async def delete_currency(cid: str, user=Depends(require_perm("settings"))):
+    cur = await db.currencies.find_one({"id": cid})
+    if not cur: raise HTTPException(status_code=404, detail="العملة غير موجودة")
+    # Check if currency was used anywhere → soft-disable instead of hard delete
+    used = (await db.sales.count_documents({"currency_symbol": cur.get("symbol")})
+            + await db.purchases.count_documents({"currency_symbol": cur.get("symbol")})
+            + await db.receipts.count_documents({"currency_symbol": cur.get("symbol")})
+            + await db.transfers.count_documents({"currency_symbol": cur.get("symbol")})
+            + await db.expenses.count_documents({"currency_symbol": cur.get("symbol")}))
+    if used > 0:
+        await db.currencies.update_one({"id": cid}, {"$set": {"active": False}})
+        return {"ok": True, "action": "disabled", "used_in": used,
+                "reason": "العملة مستخدمة في عمليات سابقة، تم تعطيلها بدلاً من الحذف"}
+    await db.currencies.delete_one({"id": cid})
+    return {"ok": True, "action": "deleted"}
+
+
+# ================= UNIFIED ACCOUNT STATEMENT =================
+@api.get("/accounts/{ptype}/{pid}/statement")
+async def account_statement(
+    ptype: str, pid: str,
+    start: Optional[str] = None, end: Optional[str] = None,
+    user=Depends(get_current_user),
+):
+    """Statement for any party: customer / pos / supplier / expense / cash.
+    Returns account metadata, entries (with running balance), and totals."""
+    s_iso = f"{start}T00:00:00+00:00" if start else None
+    e_iso = f"{end}T23:59:59+00:00" if end else None
+
+    account: Dict[str, Any] = {}
+    entries: List[Dict[str, Any]] = []
+
+    if ptype in ("customer", "pos"):
+        doc = await db.customers.find_one({"id": pid})
+        if not doc: raise HTTPException(status_code=404, detail="الحساب غير موجود")
+        account = {"id": doc["id"], "type": ("pos" if doc.get("customer_type")=="pos" else "customer"),
+                   "name": doc.get("name",""), "phone": doc.get("phone","") or "",
+                   "balance": doc.get("balance", 0), "opening_balance": doc.get("opening_balance", 0),
+                   "credit_limit": doc.get("credit_limit", 0), "status": doc.get("status","active")}
+        ledger = await db.ledger.find({"party_type": "customer", "party_id": pid}).sort("created_at", 1).to_list(20000)
+        for e in ledger:
+            entries.append({"created_at": e.get("created_at",""), "number": e.get("op_number",""),
+                            "description": e.get("description",""),
+                            "debit": e.get("debit", 0), "credit": e.get("credit", 0)})
+    elif ptype == "supplier":
+        doc = await db.suppliers.find_one({"id": pid})
+        if not doc: raise HTTPException(status_code=404, detail="الحساب غير موجود")
+        account = {"id": doc["id"], "type": "supplier",
+                   "name": doc.get("name",""), "phone": doc.get("phone","") or "",
+                   "balance": doc.get("balance", 0), "opening_balance": doc.get("opening_balance", 0),
+                   "credit_limit": doc.get("credit_limit", 0), "status": doc.get("status","active")}
+        ledger = await db.ledger.find({"party_type": "supplier", "party_id": pid}).sort("created_at", 1).to_list(20000)
+        for e in ledger:
+            entries.append({"created_at": e.get("created_at",""), "number": e.get("op_number",""),
+                            "description": e.get("description",""),
+                            "debit": e.get("debit", 0), "credit": e.get("credit", 0)})
+    elif ptype == "expense":
+        doc = await db.expense_accounts.find_one({"id": pid})
+        if not doc: raise HTTPException(status_code=404, detail="الحساب غير موجود")
+        exps = await db.expenses.find({"account_id": pid, "status": "active"}).sort("created_at", 1).to_list(20000)
+        total = sum(e.get("amount",0) for e in exps)
+        account = {"id": doc["id"], "type": "expense", "name": doc.get("name",""),
+                   "phone": "", "balance": -total, "opening_balance": 0,
+                   "credit_limit": 0, "status": "active"}
+        for e in exps:
+            entries.append({"created_at": e.get("created_at",""), "number": e.get("number",""),
+                            "description": e.get("description") or f"مصروف {e.get('account_name','')}",
+                            "debit": 0, "credit": e.get("amount", 0)})
+    elif ptype == "cash":
+        # Cash box statement — mimic /cash/statement
+        sales = await db.sales.find({"status": "active", "sale_type": "cash"}).to_list(20000)
+        recs = await db.receipts.find({"status": "active"}).to_list(20000)
+        exps = await db.expenses.find({"status": "active"}).to_list(20000)
+        trs = await db.transfers.find({"status": "active"}).to_list(20000)
+        for s in sales:
+            entries.append({"created_at": s.get("created_at",""), "number": s.get("number",""),
+                            "description": f"مبيعات نقدية — {s.get('customer_name','') or 'نقدي'}",
+                            "debit": s.get("total", 0), "credit": 0})
+        for r in recs:
+            if r.get("kind") == "receipt":
+                entries.append({"created_at": r.get("created_at",""), "number": r.get("number",""),
+                                "description": f"سند قبض — {r.get('party_name','')}",
+                                "debit": r.get("amount",0), "credit": 0})
+            else:
+                entries.append({"created_at": r.get("created_at",""), "number": r.get("number",""),
+                                "description": f"سند صرف — {r.get('party_name','')}",
+                                "debit": 0, "credit": r.get("amount",0)})
+        for e in exps:
+            entries.append({"created_at": e.get("created_at",""), "number": e.get("number",""),
+                            "description": f"مصروف — {e.get('account_name','')}" + (f" — {e.get('description')}" if e.get('description') else ""),
+                            "debit": 0, "credit": e.get("amount",0)})
+        for t in trs:
+            if t.get("dest_type") == "cash":
+                entries.append({"created_at": t.get("created_at",""), "number": t.get("number",""),
+                                "description": f"تحويل من {t.get('source_name','')}",
+                                "debit": t.get("amount",0), "credit": 0})
+            elif t.get("source_type") == "cash":
+                entries.append({"created_at": t.get("created_at",""), "number": t.get("number",""),
+                                "description": f"تحويل إلى {t.get('dest_name','')}",
+                                "debit": 0, "credit": t.get("amount",0)})
+        total_all_debit = sum(x["debit"] for x in entries)
+        total_all_credit = sum(x["credit"] for x in entries)
+        account = {"id": "cash", "type": "cash", "name": "الصندوق", "phone": "",
+                   "balance": total_all_debit - total_all_credit, "opening_balance": 0,
+                   "credit_limit": 0, "status": "active"}
+    else:
+        raise HTTPException(status_code=400, detail="نوع الحساب غير مدعوم")
+
+    entries.sort(key=lambda x: x.get("created_at",""))
+    # Compute running balance for ALL entries first
+    running = 0.0
+    for e in entries:
+        running += e.get("debit", 0) - e.get("credit", 0)
+        e["balance"] = running
+
+    # Balance BEFORE filter window
+    balance_before = 0.0
+    if s_iso:
+        for e in entries:
+            if e.get("created_at","") < s_iso:
+                balance_before += e.get("debit", 0) - e.get("credit", 0)
+
+    filtered: List[Dict[str, Any]] = []
+    for e in entries:
+        if s_iso and e.get("created_at","") < s_iso: continue
+        if e_iso and e.get("created_at","") > e_iso: continue
+        filtered.append(e)
+
+    total_debit = sum(e["debit"] for e in filtered)
+    total_credit = sum(e["credit"] for e in filtered)
+    return {
+        "account": account,
+        "range": {"start": start, "end": end},
+        "balance_before": balance_before,
+        "balance_after": running,
+        "total_debit": total_debit,
+        "total_credit": total_credit,
+        "entries": filtered,
+    }
+
+
+# ================= PAYMENT REQUESTS =================
+class PaymentRequestIn(BaseModel):
+    party_type: str  # customer / pos / supplier
+    party_id: str
+    amount: float
+    method: Optional[str] = "sms"  # sms / whatsapp / manual
+    message: Optional[str] = ""
+    idempotency_key: Optional[str] = None
+
+@api.get("/payment-requests")
+async def list_payment_requests(party_type: Optional[str] = None, party_id: Optional[str] = None, user=Depends(get_current_user)):
+    q: Dict[str, Any] = {}
+    if party_type: q["party_type"] = party_type
+    if party_id: q["party_id"] = party_id
+    items = await db.payment_requests.find(q).sort("created_at", -1).limit(2000).to_list(2000)
+    return [clean_doc(x) for x in items]
+
+@api.post("/payment-requests")
+async def create_payment_request(data: PaymentRequestIn, user=Depends(require_perm("receipts"))):
+    if data.amount is None or data.amount <= 0:
+        raise HTTPException(status_code=400, detail="المبلغ غير صالح")
+    if data.party_type not in ("customer","pos","supplier"):
+        raise HTTPException(status_code=400, detail="نوع الحساب غير مدعوم")
+    if data.idempotency_key:
+        existing = await db.payment_requests.find_one({"idempotency_key": data.idempotency_key})
+        if existing: return clean_doc(existing)
+    # Fetch party
+    col = db.customers if data.party_type in ("customer","pos") else db.suppliers
+    party = await col.find_one({"id": data.party_id})
+    if not party: raise HTTPException(status_code=404, detail="الحساب غير موجود")
+    doc = {
+        "id": str(uuid.uuid4()),
+        "number": await next_gwd_number(),
+        "party_type": data.party_type, "party_id": data.party_id,
+        "party_name": party.get("name",""), "party_phone": party.get("phone","") or "",
+        "amount": float(data.amount),
+        "method": data.method or "sms",
+        "message": (data.message or "").strip(),
+        "status": "sent",  # new / sent / paid / cancelled
+        "user_id": user["id"], "username": user.get("username"),
+        "idempotency_key": data.idempotency_key,
+        "created_at": now_iso(),
+    }
+    await db.payment_requests.insert_one(doc)
+    await audit_log(user, "create", "payment_request", doc["id"], None, {"amount": data.amount})
+    return clean_doc(doc)
+
+@api.post("/payment-requests/{rid}/status")
+async def set_payment_request_status(rid: str, new_status: str, user=Depends(require_perm("receipts"))):
+    if new_status not in ("new","sent","paid","cancelled"):
+        raise HTTPException(status_code=400, detail="حالة غير صحيحة")
+    await db.payment_requests.update_one({"id": rid}, {"$set": {"status": new_status, "updated_at": now_iso()}})
+    doc = await db.payment_requests.find_one({"id": rid})
+    if not doc: raise HTTPException(status_code=404, detail="الطلب غير موجود")
+    return clean_doc(doc)
 
 
 # ================= CARD ORDERS (PUBLIC) =================
@@ -2960,6 +3242,11 @@ async def startup():
     await db.purchases.create_index("idempotency_key")
     await db.transfers.create_index("number")
     await db.transfers.create_index("idempotency_key")
+    await db.stock_ops.create_index("category_id")
+    await db.stock_ops.create_index("created_at")
+    await db.currencies.create_index("symbol", unique=True)
+    await db.payment_requests.create_index("party_id")
+    await db.payment_requests.create_index("idempotency_key")
     await db.receipts.create_index("number", unique=True)
     await db.receipts.create_index("idempotency_key")
     # Seed admin

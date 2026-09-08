@@ -9,7 +9,76 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { fmt } from "@/lib/utils";
-import { Database, RotateCcw, Trash2, Download, Upload, Send, CloudDownload } from "lucide-react";
+import { Database, RotateCcw, Trash2, Download, Upload, Send, CloudDownload, Plus, Coins } from "lucide-react";
+
+function CurrenciesManager() {
+  const [items, setItems] = useState([]);
+  const [form, setForm] = useState({ name: "", symbol: "", rate_to_yer: "", active: true });
+  const [editing, setEditing] = useState(null);
+  const load = () => api.get("/currencies").then((r) => setItems(r.data)).catch(() => {});
+  useEffect(() => { load(); }, []);
+  const save = async () => {
+    if (!form.name.trim() || !form.symbol.trim() || !form.rate_to_yer || Number(form.rate_to_yer) <= 0) {
+      toast.error("اكمل بيانات العملة"); return;
+    }
+    try {
+      const payload = { name: form.name.trim(), symbol: form.symbol.trim(), rate_to_yer: Number(form.rate_to_yer), active: !!form.active };
+      if (editing) await api.put(`/currencies/${editing.id}`, payload);
+      else await api.post("/currencies", payload);
+      toast.success("تم الحفظ");
+      setForm({ name: "", symbol: "", rate_to_yer: "", active: true });
+      setEditing(null);
+      load();
+    } catch (e) { toast.error(errText(e)); }
+  };
+  const remove = async (c) => {
+    if (!window.confirm(`حذف العملة "${c.name}"؟ إذا كانت مستخدمة سيتم تعطيلها فقط دون حذف السجل التاريخي.`)) return;
+    try {
+      const r = await api.delete(`/currencies/${c.id}`);
+      toast.success(r.data.action === "disabled" ? "تم تعطيل العملة (لأنها مستخدمة في عمليات سابقة)" : "تم الحذف");
+      load();
+    } catch (e) { toast.error(errText(e)); }
+  };
+  const beginEdit = (c) => { setEditing(c); setForm({ name: c.name, symbol: c.symbol, rate_to_yer: c.rate_to_yer, active: !!c.active }); };
+  return (
+    <div className="space-y-3">
+      <div className="text-xs text-slate-500 bg-blue-50 border border-blue-200 rounded p-2">
+        <Coins size={12} className="inline ml-1"/>
+        يتم حفظ العملة وسعر الصرف مع كل عملية. تغيير سعر الصرف يؤثر على العمليات الجديدة فقط.
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 items-end">
+        <div><Label>الاسم</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="دولار أمريكي" data-testid="cur-name"/></div>
+        <div><Label>الرمز</Label><Input value={form.symbol} onChange={(e) => setForm({ ...form, symbol: e.target.value })} placeholder="USD" data-testid="cur-symbol"/></div>
+        <div><Label>سعر مقابل الريال</Label><Input type="number" value={form.rate_to_yer} onChange={(e) => setForm({ ...form, rate_to_yer: e.target.value })} placeholder="530" data-testid="cur-rate"/></div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs flex items-center gap-1"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} data-testid="cur-active"/> مفعّلة</label>
+          <Button onClick={save} className="bg-[#221340]" data-testid="cur-save"><Plus size={14} className="ml-1"/> {editing ? "تحديث" : "إضافة"}</Button>
+          {editing && <button onClick={() => { setEditing(null); setForm({ name: "", symbol: "", rate_to_yer: "", active: true }); }} className="text-xs text-slate-500 hover:underline">إلغاء التعديل</button>}
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50"><tr className="text-right"><th className="p-2">الاسم</th><th className="p-2">الرمز</th><th className="p-2">السعر (ريال)</th><th className="p-2">الحالة</th><th className="p-2">إجراء</th></tr></thead>
+          <tbody>
+            {items.map((c) => (
+              <tr key={c.id} className="border-t">
+                <td className="p-2">{c.name}</td>
+                <td className="p-2 font-mono">{c.symbol}</td>
+                <td className="p-2 num">{fmt(c.rate_to_yer)}</td>
+                <td className="p-2"><span className={`text-xs px-2 py-0.5 rounded-full ${c.active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>{c.active ? "مفعّلة" : "معطلة"}</span></td>
+                <td className="p-2 flex gap-1">
+                  <Button size="sm" variant="outline" className="h-6 text-xs" onClick={() => beginEdit(c)} data-testid={`cur-edit-${c.id}`}>تعديل</Button>
+                  <Button size="sm" variant="outline" className="h-6 text-xs text-red-600" onClick={() => remove(c)} data-testid={`cur-del-${c.id}`}><Trash2 size={12}/></Button>
+                </td>
+              </tr>
+            ))}
+            {items.length === 0 && <tr><td colSpan={5} className="p-4 text-center text-slate-400">لا توجد عملات — أضف عملة جديدة أعلاه</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 export default function SettingsPage() {
   const [s, setS] = useState({ currency: "ريال", logo_url: "", low_stock_default: 20, backup_email: "" });
@@ -180,6 +249,11 @@ export default function SettingsPage() {
         <div><Label>حد التنبيه الافتراضي للمخزون</Label><Input type="number" value={s.low_stock_default || 20} onChange={(e) => setS({ ...s, low_stock_default: Number(e.target.value) })}/></div>
         <div><Label>رابط الشعار</Label><Input value={s.logo_url || ""} onChange={(e) => setS({ ...s, logo_url: e.target.value })}/></div>
         <Button onClick={save} className="bg-[#221340]" data-testid="set-save">حفظ</Button>
+      </Card>
+
+      <Card className="p-6 space-y-4" data-testid="currencies-panel">
+        <div className="text-lg font-bold text-[#221340]">العملات المتعددة</div>
+        <CurrenciesManager/>
       </Card>
 
       <Card className="p-6 space-y-4">

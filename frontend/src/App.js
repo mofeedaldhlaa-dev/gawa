@@ -27,6 +27,7 @@ import Expenses from "@/pages/Expenses";
 import Orders from "@/pages/Orders";
 import Reports from "@/pages/Reports";
 import Accounts from "@/pages/Accounts";
+import AccountDetail from "@/pages/AccountDetail";
 import UsersPage from "@/pages/Users";
 import Notifications from "@/pages/Notifications";
 import AuditLog from "@/pages/AuditLog";
@@ -227,6 +228,7 @@ function AppRoutes() {
       <Route path="/receipts" element={<Guard perm="receipts"><Receipts /></Guard>} />
       <Route path="/expenses" element={<Guard perm="expenses"><Expenses /></Guard>} />
       <Route path="/accounts" element={<Guard perm="receipts"><Accounts /></Guard>} />
+      <Route path="/accounts/:type/:id" element={<Guard perm="receipts"><AccountDetail /></Guard>} />
       <Route path="/orders" element={<Guard perm="card_orders"><Orders /></Guard>} />
       <Route path="/reports" element={<Guard perm="reports"><Reports /></Guard>} />
       <Route path="/users" element={<Guard perm="users"><UsersPage /></Guard>} />

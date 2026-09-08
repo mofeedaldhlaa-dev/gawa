@@ -7,7 +7,7 @@ import { fmt, fmtDate } from "@/lib/utils";
 import { printReport } from "@/lib/print";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
-import { ShoppingCart, Package, Users, Truck, Boxes, CreditCard, Receipt, FileBarChart, Ticket, PlusCircle, AlertTriangle, Wallet, Printer } from "lucide-react";
+import { ShoppingCart, Package, Users, Truck, Boxes, CreditCard, Receipt, FileBarChart, Ticket, PlusCircle, AlertTriangle, Wallet, Printer, Search } from "lucide-react";
 
 const _iso = (d) => d.toISOString().slice(0, 10);
 const _startOfToday = () => { const d = new Date(); d.setHours(0,0,0,0); return d; };
@@ -93,6 +93,76 @@ const Quick = ({ to, label, icon: Icon, testid }) => (
   </Link>
 );
 
+function AccountsPanel() {
+  const [items, setItems] = useState([]);
+  const [q, setQ] = useState("");
+  const [type, setType] = useState("all");
+  const [sortBy, setSortBy] = useState("name"); // name / balance
+  useEffect(() => { api.get("/accounts").then((r) => setItems(r.data)).catch(() => {}); }, []);
+  const TYPE_LABELS = { all: "الكل", cash: "الصندوق", customer: "عملاء", pos: "نقاط بيع", supplier: "موردون", expense: "مصروفات" };
+  const TYPE_COLORS = {
+    cash: "bg-emerald-50 border-emerald-300 text-emerald-800",
+    customer: "bg-blue-50 border-blue-300 text-blue-800",
+    pos: "bg-purple-50 border-purple-300 text-purple-800",
+    supplier: "bg-amber-50 border-amber-300 text-amber-800",
+    expense: "bg-red-50 border-red-300 text-red-800",
+  };
+  const counts = items.reduce((acc, it) => { acc[it.type] = (acc[it.type] || 0) + 1; return acc; }, { all: items.length });
+  let filtered = items.filter((a) => {
+    if (type !== "all" && a.type !== type) return false;
+    const ql = q.trim().toLowerCase();
+    if (ql && !((a.name || "").toLowerCase().includes(ql) || (a.phone || "").includes(ql))) return false;
+    return true;
+  });
+  filtered.sort((a, b) => sortBy === "balance" ? (b.balance || 0) - (a.balance || 0) : (a.name || "").localeCompare(b.name || "", "ar"));
+  const stateLabel = (b) => (b > 0 ? "له" : b < 0 ? "عليه" : "متعادل");
+  const stateColor = (b) => (b > 0 ? "text-emerald-700" : b < 0 ? "text-red-700" : "text-slate-500");
+  return (
+    <Card className="p-4 border-r-4 border-[#452480]" data-testid="dash-accounts">
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+        <div className="flex items-center gap-2 font-bold text-[#221340]"><Users size={18} className="text-[#452480]"/> الحسابات</div>
+        <div className="flex flex-wrap gap-1 items-center">
+          <div className="relative">
+            <Search size={12} className="absolute right-2 top-2.5 text-slate-400"/>
+            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="بحث..." className="h-8 w-40 pr-7 text-xs" data-testid="dash-acc-search"/>
+          </div>
+          <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="h-8 text-xs border rounded px-1" data-testid="dash-acc-sort">
+            <option value="name">ترتيب: الاسم</option>
+            <option value="balance">ترتيب: الرصيد</option>
+          </select>
+          <Link to="/accounts" className="text-xs text-[#452480] hover:underline" data-testid="dash-acc-viewall">عرض الكل</Link>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-1 mb-3">
+        {["all","cash","customer","pos","supplier","expense"].map((k) => (
+          <button key={k} onClick={() => setType(k)} className={`px-2.5 py-1 rounded-full text-xs border ${type===k?"bg-[#452480] text-white border-[#452480]":"border-slate-300 hover:bg-slate-50"}`} data-testid={`dash-acc-type-${k}`}>
+            {TYPE_LABELS[k]} <span className="opacity-70">({counts[k] || 0})</span>
+          </button>
+        ))}
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
+        {filtered.slice(0, 24).map((a) => (
+          <Link to={a.type === "cash" ? "/accounts" : `/accounts/${a.type}/${a.id}`} key={`${a.type}-${a.id}`} data-testid={`dash-acc-card-${a.id}`}
+            className={`p-3 rounded-lg border transition hover:shadow ${TYPE_COLORS[a.type] || "bg-slate-50 border-slate-200"}`}>
+            <div className="flex justify-between items-start gap-1">
+              <div className="min-w-0">
+                <div className="font-bold text-sm truncate">{a.name}</div>
+                <div className="text-[10px] opacity-70">{TYPE_LABELS[a.type] || a.type} {a.phone ? `• ${a.phone}` : ""}</div>
+              </div>
+              <span className={`text-[10px] font-bold ${stateColor(a.balance || 0)}`}>{stateLabel(a.balance || 0)}</span>
+            </div>
+            <div className={`mt-1 num font-black text-lg ${stateColor(a.balance || 0)}`}>{fmt(a.balance || 0)}</div>
+          </Link>
+        ))}
+        {filtered.length === 0 && <div className="col-span-full text-center text-slate-400 text-sm py-6">لا توجد حسابات</div>}
+      </div>
+      {filtered.length > 24 && (
+        <div className="text-center mt-2 text-xs text-slate-500">تظهر أول 24 حساب — <Link to="/accounts" className="text-[#452480]">اعرض الكل</Link></div>
+      )}
+    </Card>
+  );
+}
+
 export default function Dashboard() {
   const [d, setD] = useState(null);
   useEffect(() => { api.get("/reports/dashboard").then((r) => setD(r.data)); }, []);
@@ -101,6 +171,7 @@ export default function Dashboard() {
   return (
     <div className="space-y-6" data-testid="dashboard">
       <CashBox />
+      <AccountsPanel />
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-3">
         <Stat testid="stat-sales-today" label="مبيعات اليوم" value={fmt(d.sales_today)} tone="purple" />
         <Stat testid="stat-sales-month" label="مبيعات الشهر" value={fmt(d.sales_month)} tone="gold" />
