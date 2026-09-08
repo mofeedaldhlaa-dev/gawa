@@ -18,43 +18,26 @@
 - Print customer statement with date range
 - Sales page filters + report print
 - **2026-02 Phase 1 (Accounting core)**:
-  - Cash Box on Dashboard (`/api/cash/summary`, `/api/cash/statement`)
-  - Expenses screen (`/expenses`) with account management inline
-  - Receipts page enhanced: period + kind filter + summary + print
+  - Cash Box on Dashboard, Expenses screen, Receipts filters
 - **2026-02 Phase 2 (Accounts & Reports)**:
-  - Unified Accounts screen (`/accounts`) — customers/POS/suppliers/expense/cash with balances, filter by type, grouped print
-  - Transfers between accounts (`POST /api/transfers`, `GET /api/transfers`)
-  - Opening balances report (`GET /api/reports/opening-balances`)
-  - Item movement report (`GET /api/reports/item-movement`)
-  - Currency dropdown in Settings
-- **2026-02 Phase 3 (Dashboard integration + Full account experience)**:
-  - **Accounts panel on Dashboard** below Cashbox — cards with type filter, search, sort by name/balance, quick view
-  - **Account detail page** (`/accounts/:type/:id`) — full statement with balance-before, total debit/credit, running balance
-    - **Add Voucher** button (creates receipt/payment via `/api/receipts`, auto-updates cashbox & party balance)
-    - **Add Invoice** deep-link to `/sales/new?customer=` or `/purchases/new`
-    - **Print statement** (day/month/year/custom) using unified template
-    - **Payment Request** dialog — creates record + opens SMS/WhatsApp with pre-filled body; does NOT change balance until real payment recorded
-  - **Currency CRUD** (`GET/POST/PUT/DELETE /api/currencies`) — with soft-disable when used in operations; each op stores `currency_symbol` + rate at creation time
-  - **Payment Requests API** (`GET/POST /api/payment-requests`, `POST /api/payment-requests/:id/status`) — status: new/sent/paid/cancelled
-  - **Unified Account Statement** endpoint (`GET /api/accounts/:type/:id/statement?start&end`) — works for customer/pos/supplier/expense/cash
-  - **Item movement now includes**: purchases + sales + `db.stock_ops` (direct additions: numbered & quantity) + legacy card creations
-    - New collection `stock_ops` logs every non-invoice inventory addition; balance-before correctly includes these
+  - Unified Accounts screen + Transfers + Opening balances report + Item movement + Currency dropdown
+- **2026-02 Phase 3 (Full accounting integration)**:
+  - Dashboard Accounts panel + Account detail page + Currency CRUD + Payment requests + Item-movement includes direct additions (`stock_ops`)
+- **2026-02 Phase 4 (Dashboard UX + Prefill)**:
+  - **Cashbox** and **Accounts** on Dashboard are now **collapsible sections** — icon + main title header, expand to view details
+  - **Removed** the standalone "الحسابات" entry from the sidebar (route `/accounts` still available for internal navigation from account cards)
+  - **Add invoice from account detail** auto-prefills the customer via `?customer=<id>` query param in `/sales/new`
 
 ## API cheatsheet
-- Cash: `GET /api/cash/summary?start&end`, `GET /api/cash/statement?start&end`
-- Expenses: `GET/POST /api/expenses`, `DELETE /api/expenses/{id}`
-- Receipts: `GET/POST /api/receipts`, `PUT /api/receipts/{id}`
-- Transfers: `POST /api/transfers`, `GET /api/transfers`
-- Accounts: `GET /api/accounts` (list), `GET /api/accounts/{type}/{id}/statement`
+- Accounts: `GET /api/accounts`, `GET /api/accounts/{type}/{id}/statement?start&end`
 - Currencies: `GET/POST/PUT/DELETE /api/currencies`
 - Payment Requests: `GET/POST /api/payment-requests`, `POST /api/payment-requests/{id}/status?new_status=..`
+- Transfers: `POST /api/transfers`, `GET /api/transfers`
+- Cash: `GET /api/cash/summary`, `GET /api/cash/statement`
 - Reports: `GET /api/reports/opening-balances`, `GET /api/reports/item-movement?category_id&start&end`
 
-## Deferred (Phase 4)
-- Wire up currency selection into Sales/Purchases/Receipts forms UI (backend already stores `currency_symbol` + rate)
-- Extend item movement to include cancelled sales/purchases reversals & manual adjustments
-
-## Blockers / Deferred long-term
-- Atlas migration BLOCKED (Atlas IP firewall)
+## Blockers / Deferred
+- Atlas migration BLOCKED
 - P0: Biometric login (WebAuthn/Passkeys)
+- P1: Currency picker inside sales/purchase/receipt forms (backend ready)
 - P2: Refactor server.py (~3300 lines) into `routers/`

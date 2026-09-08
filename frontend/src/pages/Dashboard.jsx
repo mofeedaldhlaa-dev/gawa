@@ -7,7 +7,7 @@ import { fmt, fmtDate } from "@/lib/utils";
 import { printReport } from "@/lib/print";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
-import { ShoppingCart, Package, Users, Truck, Boxes, CreditCard, Receipt, FileBarChart, Ticket, PlusCircle, AlertTriangle, Wallet, Printer, Search } from "lucide-react";
+import { ShoppingCart, Package, Users, Truck, Boxes, CreditCard, Receipt, FileBarChart, Ticket, PlusCircle, AlertTriangle, Wallet, Printer, Search, ChevronDown, ChevronUp } from "lucide-react";
 
 const _iso = (d) => d.toISOString().slice(0, 10);
 const _startOfToday = () => { const d = new Date(); d.setHours(0,0,0,0); return d; };
@@ -47,9 +47,8 @@ function CashBox() {
   };
   if (!data) return null;
   return (
-    <Card className="p-4 border-r-4 border-emerald-500" data-testid="dash-cashbox">
+    <Card className="p-4" data-testid="dash-cashbox">
       <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
-        <div className="flex items-center gap-2 font-bold text-[#221340]"><Wallet size={18} className="text-emerald-600"/> صندوق النقدية</div>
         <div className="flex gap-1 flex-wrap">
           {[["day","يومي"],["month","شهري"],["year","سنوي"]].map(([k,l]) => (
             <button key={k} onClick={() => apply(k)} className={`px-2.5 py-1 rounded-full text-xs border ${period===k?"bg-emerald-600 text-white border-emerald-600":"border-slate-300"}`} data-testid={`cash-period-${k}`}>{l}</button>
@@ -118,9 +117,8 @@ function AccountsPanel() {
   const stateLabel = (b) => (b > 0 ? "له" : b < 0 ? "عليه" : "متعادل");
   const stateColor = (b) => (b > 0 ? "text-emerald-700" : b < 0 ? "text-red-700" : "text-slate-500");
   return (
-    <Card className="p-4 border-r-4 border-[#452480]" data-testid="dash-accounts">
+    <Card className="p-4" data-testid="dash-accounts">
       <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
-        <div className="flex items-center gap-2 font-bold text-[#221340]"><Users size={18} className="text-[#452480]"/> الحسابات</div>
         <div className="flex flex-wrap gap-1 items-center">
           <div className="relative">
             <Search size={12} className="absolute right-2 top-2.5 text-slate-400"/>
@@ -130,7 +128,6 @@ function AccountsPanel() {
             <option value="name">ترتيب: الاسم</option>
             <option value="balance">ترتيب: الرصيد</option>
           </select>
-          <Link to="/accounts" className="text-xs text-[#452480] hover:underline" data-testid="dash-acc-viewall">عرض الكل</Link>
         </div>
       </div>
       <div className="flex flex-wrap gap-1 mb-3">
@@ -157,21 +154,71 @@ function AccountsPanel() {
         {filtered.length === 0 && <div className="col-span-full text-center text-slate-400 text-sm py-6">لا توجد حسابات</div>}
       </div>
       {filtered.length > 24 && (
-        <div className="text-center mt-2 text-xs text-slate-500">تظهر أول 24 حساب — <Link to="/accounts" className="text-[#452480]">اعرض الكل</Link></div>
+        <div className="text-center mt-2 text-xs text-slate-500">تظهر أول 24 حساب فقط</div>
       )}
+    </Card>
+  );
+}
+
+function CollapsibleSection({ icon: Icon, iconColor = "text-[#452480]", title, testid, defaultOpen = false, subtitle, children }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <Card className={`overflow-hidden border-r-4 ${iconColor.includes("emerald") ? "border-emerald-500" : "border-[#452480]"}`} data-testid={testid}>
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between gap-3 p-4 hover:bg-slate-50 transition"
+        data-testid={`${testid}-toggle`}
+        aria-expanded={open}
+      >
+        <div className="flex items-center gap-3 min-w-0">
+          <div className={`w-10 h-10 rounded-lg flex items-center justify-center bg-slate-50 ${iconColor}`}>
+            <Icon size={22} />
+          </div>
+          <div className="text-right min-w-0">
+            <div className="font-bold text-[#221340]">{title}</div>
+            {subtitle && <div className="text-xs text-slate-500 mt-0.5 truncate">{subtitle}</div>}
+          </div>
+        </div>
+        <div className="text-slate-400 shrink-0">{open ? <ChevronUp size={20}/> : <ChevronDown size={20}/>}</div>
+      </button>
+      {open && <div className="border-t border-slate-100 p-4">{children}</div>}
     </Card>
   );
 }
 
 export default function Dashboard() {
   const [d, setD] = useState(null);
-  useEffect(() => { api.get("/reports/dashboard").then((r) => setD(r.data)); }, []);
+  const [cashSummary, setCashSummary] = useState(null);
+  const [accountsCount, setAccountsCount] = useState(0);
+  useEffect(() => {
+    api.get("/reports/dashboard").then((r) => setD(r.data));
+    api.get("/cash/summary").then((r) => setCashSummary(r.data)).catch(() => {});
+    api.get("/accounts").then((r) => setAccountsCount(r.data.length)).catch(() => {});
+  }, []);
   if (!d) return <div className="p-8">جاري التحميل...</div>;
 
   return (
-    <div className="space-y-6" data-testid="dashboard">
-      <CashBox />
-      <AccountsPanel />
+    <div className="space-y-4" data-testid="dashboard">
+      <CollapsibleSection
+        icon={Wallet}
+        iconColor="text-emerald-600"
+        title="صندوق النقدية"
+        subtitle={cashSummary ? `الرصيد الحالي: ${fmt(cashSummary.balance)}` : "اضغط للعرض"}
+        testid="dash-cashbox-section"
+      >
+        <CashBox />
+      </CollapsibleSection>
+
+      <CollapsibleSection
+        icon={Users}
+        iconColor="text-[#452480]"
+        title="الحسابات"
+        subtitle={accountsCount ? `${accountsCount} حساب — عملاء، نقاط بيع، موردون، مصروفات` : "اضغط للعرض"}
+        testid="dash-accounts-section"
+      >
+        <AccountsPanel />
+      </CollapsibleSection>
+
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-3">
         <Stat testid="stat-sales-today" label="مبيعات اليوم" value={fmt(d.sales_today)} tone="purple" />
         <Stat testid="stat-sales-month" label="مبيعات الشهر" value={fmt(d.sales_month)} tone="gold" />

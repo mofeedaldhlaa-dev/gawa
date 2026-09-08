@@ -70,7 +70,6 @@ const menu = [
   { path: "/stock", label: "المخزون", icon: Boxes, perm: "stock" },
   { path: "/receipts", label: "السندات", icon: Receipt, perm: "receipts" },
   { path: "/expenses", label: "المصروفات", icon: Wallet, perm: "expenses" },
-  { path: "/accounts", label: "الحسابات", icon: Wallet, perm: "receipts" },
   { path: "/orders", label: "طلبات الكروت", icon: Ticket, perm: "card_orders" },
   { path: "/reports", label: "التقارير", icon: BarChart3, perm: "reports" },
   { path: "/users", label: "المستخدمون", icon: UserCog, perm: "users" },

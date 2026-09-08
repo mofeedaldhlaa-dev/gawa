@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { fmt, openWhatsApp, buildInvoiceMessage, genUUID, deviceId } from "@/lib/utils";
 import { Plus, Trash2, Save, MessageCircle } from "lucide-react";
 import { queueOperation, isOnline } from "@/lib/offline";
@@ -16,6 +16,8 @@ import { queueOperation, isOnline } from "@/lib/offline";
 export default function SaleForm() {
   const nav = useNavigate();
   const { id: editId } = useParams();
+  const [searchParams] = useSearchParams();
+  const prefillCustomer = searchParams.get("customer");
   const isEdit = !!editId;
 
   const [cats, setCats] = useState([]);
@@ -37,6 +39,18 @@ export default function SaleForm() {
     api.get("/customers").then((r) => setCustomers(r.data));
     api.get("/settings").then((r) => setSettings(r.data));
   }, []);
+
+  // Prefill customer from URL when adding a new invoice from within account details
+  useEffect(() => {
+    if (isEdit) return;
+    if (prefillCustomer && customers.length && !customerId) {
+      const exists = customers.find((c) => c.id === prefillCustomer);
+      if (exists) {
+        setCustomerId(prefillCustomer);
+        setSaleType((prev) => prev || "credit");
+      }
+    }
+  }, [prefillCustomer, customers, isEdit]);
 
   useEffect(() => {
     if (!isEdit) return;
