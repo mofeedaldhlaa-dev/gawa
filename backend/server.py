@@ -426,6 +426,7 @@ class CardOrderRequest(BaseModel):
     password: str
     category_id: str
     quantity: int = 1
+    recipient_phone: Optional[str] = None  # optional: send the card to another number
 
 class CardOrderHistoryIn(BaseModel):
     phone: str
@@ -1642,6 +1643,15 @@ async def public_order(data: CardOrderRequest):
         raise HTTPException(status_code=403, detail="الحساب معطل")
     cat = await db.card_categories.find_one({"id": data.category_id})
     if not cat: raise HTTPException(status_code=404, detail="الفئة غير موجودة")
+    # Normalize recipient phone (keep only digits/+). If it equals sender's phone, treat as None.
+    recipient = (data.recipient_phone or "").strip()
+    if recipient:
+        digits = "".join(ch for ch in recipient if ch.isdigit() or ch == "+")
+        if len(digits) < 6:
+            raise HTTPException(status_code=400, detail="رقم الهاتف المستلم غير صالح")
+        recipient = digits
+        if recipient == (customer.get("phone") or "").strip():
+            recipient = ""  # same as sender; ignore
     # Pick price according to customer type (POS vs regular customer)
     ctype = customer.get("customer_type", "customer")
     unit_price = cat.get("sale_price_pos") if ctype == "pos" else cat.get("sale_price_customer")
@@ -1697,7 +1707,9 @@ async def public_order(data: CardOrderRequest):
                    "quantity": data.quantity, "price": unit_price,
                    "total": total, "card_numbers": cards_reserved, "use_numbered": True}],
         "subtotal": total, "discount": 0, "total": total, "paid": 0, "remaining": total,
-        "notes": "طلب عبر رابط طلب الكرت", "status": "active", "created_at": now_iso(),
+        "notes": ("طلب عبر رابط طلب الكرت" + (f" — تحويل إلى: {recipient}" if recipient else "")),
+        "recipient_phone": recipient or None,
+        "status": "active", "created_at": now_iso(),
     }
     await db.sales.insert_one(sale_doc)
     balance_after = await _adjust_party_balance("customer", customer["id"], total, number, f"مبيعات إلكترونية - طلب كرت {number}")
@@ -1707,7 +1719,8 @@ async def public_order(data: CardOrderRequest):
         "id": str(uuid.uuid4()), "customer_id": customer["id"], "customer_name": customer["name"],
         "phone": customer["phone"], "category_id": data.category_id, "category_name": cat.get("name"),
         "quantity": data.quantity, "total": total, "cards": cards_reserved,
-        "invoice_number": number, "status": "success", "reason": "",
+        "invoice_number": number, "recipient_phone": recipient or None,
+        "status": "success", "reason": "",
         "created_at": now_iso(),
     })
 
@@ -1717,14 +1730,17 @@ async def public_order(data: CardOrderRequest):
         "customer_name": customer["name"], "phone": customer["phone"],
         "category_id": data.category_id, "category_name": cat.get("name"),
         "quantity": data.quantity, "total": total, "cards": cards_reserved,
+        "recipient_phone": recipient or None,
         "quantity_stock_taken": 0,
         "status": "delivered", "created_at": now_iso(),
     }
     await db.orders.insert_one(order_doc)
-    await notify(f"طلب كرت {number}", f"طلب كرت جديد من {customer['name']}", "success")
+    notify_msg = f"طلب كرت جديد من {customer['name']}" + (f" — تحويل إلى {recipient}" if recipient else "")
+    await notify(f"طلب كرت {number}", notify_msg, "success")
     return {
         "success": True, "cards": cards_reserved,
         "quantity_from_stock": 0, "total": total,
+        "recipient_phone": recipient or None,
         "balance_after": balance_after, "message": "تم تنفيذ طلبك بنجاح",
     }
 

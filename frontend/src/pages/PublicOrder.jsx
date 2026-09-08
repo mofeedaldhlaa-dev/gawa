@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { toast } from "sonner";
 import { fmt, fmtDate, openWhatsApp, phoneFingerprint } from "@/lib/utils";
 import { printPublicOrder } from "@/lib/print";
-import { Wifi, CheckCircle, Copy, KeyRound, Phone, Ban, AlertCircle, Printer, History, Search } from "lucide-react";
+import { Wifi, CheckCircle, Copy, KeyRound, Phone, Ban, AlertCircle, Printer, History, Search, ContactRound, Send } from "lucide-react";
 
 const ADMIN_WHATSAPP = "784225716";
 
@@ -33,6 +33,9 @@ export default function PublicOrder() {
   const [showChangePwd, setShowChangePwd] = useState(false);
   const [blocked, setBlocked] = useState(false);
   const [selectedCat, setSelectedCat] = useState(null);
+  const [sendToOther, setSendToOther] = useState(false);
+  const [recipientPhone, setRecipientPhone] = useState("");
+  const [pickingContact, setPickingContact] = useState(false);
   const [loginError, setLoginError] = useState("");
   const [deviceMismatch, setDeviceMismatch] = useState(false);
   const [accountDisabled, setAccountDisabled] = useState(false);
@@ -86,14 +89,50 @@ export default function PublicOrder() {
     setLoading(false);
   };
 
+  const contactPickerSupported = typeof navigator !== "undefined" && "contacts" in navigator && typeof navigator.contacts?.select === "function";
+
+  const pickContact = async () => {
+    if (!contactPickerSupported) {
+      toast.error("متصفحك لا يدعم اختيار جهات الاتصال. الرجاء استخدام Chrome على أندرويد أو إدخال الرقم يدوياً.");
+      return;
+    }
+    setPickingContact(true);
+    try {
+      const contacts = await navigator.contacts.select(["tel", "name"], { multiple: false });
+      if (contacts && contacts.length > 0) {
+        const c = contacts[0];
+        const tel = Array.isArray(c.tel) ? c.tel[0] : c.tel;
+        if (tel) {
+          const digits = String(tel).replace(/[^0-9+]/g, "");
+          setRecipientPhone(digits);
+          toast.success(`تم اختيار: ${c.name?.[0] || digits}`);
+        } else {
+          toast.error("جهة الاتصال المختارة لا تحتوي على رقم هاتف");
+        }
+      }
+    } catch (e) {
+      if (e?.name !== "AbortError" && e?.name !== "NotAllowedError") {
+        toast.error("تعذر فتح جهات الاتصال");
+      }
+    }
+    setPickingContact(false);
+  };
+
   const request = async () => {
     if (!category_id) { toast.error("اختر الفئة"); return; }
+    if (sendToOther) {
+      const digits = (recipientPhone || "").replace(/[^0-9+]/g, "");
+      if (digits.length < 6) { toast.error("أدخل رقم هاتف صحيح للمستلم"); return; }
+      setRecipientPhone(digits);
+    }
     setLoading(true);
     try {
-      const r = await api.post("/public/card-order/request", { phone, password, category_id, quantity: Number(quantity) });
+      const payload = { phone, password, category_id, quantity: Number(quantity) };
+      if (sendToOther && recipientPhone) payload.recipient_phone = recipientPhone.replace(/[^0-9+]/g, "");
+      const r = await api.post("/public/card-order/request", payload);
       setResult(r.data);
       setSelectedCat(cats.find((c) => c.id === category_id));
-      toast.success("تم تنفيذ طلبك بنجاح");
+      toast.success(payload.recipient_phone ? `تم تنفيذ الطلب — تحويل إلى ${payload.recipient_phone}` : "تم تنفيذ طلبك بنجاح");
     } catch (e) { toast.error(errText(e)); }
     setLoading(false);
   };
@@ -241,6 +280,31 @@ export default function PublicOrder() {
                 <AlertCircle size={16} className="mt-0.5 shrink-0"/><span>لا تتوفر كمية الكروت المطلوبة</span>
               </div>
             )}
+
+            {/* Send to another phone */}
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={sendToOther} onChange={(e) => { setSendToOther(e.target.checked); if (!e.target.checked) setRecipientPhone(""); }} data-testid="po-send-other-toggle" className="h-4 w-4"/>
+                <Send size={14} className="text-[#452480]"/>
+                <span className="text-sm font-medium">إرسال الكرت لرقم آخر</span>
+              </label>
+              {sendToOther && (
+                <div className="space-y-2 pt-1">
+                  <div className="flex gap-2">
+                    <Input type="tel" inputMode="tel" placeholder="أدخل رقم الهاتف المستلم" value={recipientPhone} onChange={(e) => setRecipientPhone(e.target.value)} data-testid="po-recipient-phone" className="flex-1"/>
+                    <Button type="button" onClick={pickContact} disabled={pickingContact} variant="outline" className="shrink-0 border-[#452480] text-[#452480] hover:bg-[#452480]/10" data-testid="po-pick-contact">
+                      <ContactRound size={16} className="ml-1"/> جهات الاتصال
+                    </Button>
+                  </div>
+                  {!contactPickerSupported && (
+                    <div className="text-[11px] text-slate-500">
+                      اختيار جهات الاتصال متاح فقط في متصفح Chrome على أندرويد. يمكنك إدخال الرقم يدوياً.
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             <Button onClick={request} disabled={loading || !category_id || wantQty < 1 || insufficient} className="w-full bg-[#D4AF37] text-[#1A0F33] font-bold hover:bg-[#C5A028] text-lg py-6 disabled:opacity-50" data-testid="po-request">طلب</Button>
 
             {/* Previous orders section */}
@@ -303,6 +367,12 @@ export default function PublicOrder() {
               <div className="font-bold text-lg mt-2">تم تنفيذ طلبك بنجاح</div>
             </div>
             {selectedCat && <div className="text-center text-sm bg-slate-50 py-2 rounded">فئة الكرت: <span className="font-bold gold-text">{selectedCat.name}</span></div>}
+            {result.recipient_phone && (
+              <div className="text-center text-sm bg-amber-50 border border-amber-200 py-2 rounded flex items-center justify-center gap-2" data-testid="po-result-recipient">
+                <Send size={14} className="text-amber-700"/>
+                <span>تم التحويل إلى: <span className="font-mono font-bold text-amber-800">{result.recipient_phone}</span></span>
+              </div>
+            )}
             {result.cards?.length > 0 && (
               <Card className="p-3 bg-green-50">
                 <div className="text-sm font-bold mb-2">الكروت المطلوبة:</div>
@@ -320,7 +390,7 @@ export default function PublicOrder() {
               <div className="text-slate-500">المديونية بعد العملية</div>
               <div className="text-2xl font-bold num">{fmt(result.balance_after)}</div>
             </div>
-            <Button onClick={() => { setResult(null); setCategoryId(""); setQuantity(1); setSelectedCat(null); }} variant="outline" className="w-full">طلب جديد</Button>
+            <Button onClick={() => { setResult(null); setCategoryId(""); setQuantity(1); setSelectedCat(null); setSendToOther(false); setRecipientPhone(""); }} variant="outline" className="w-full">طلب جديد</Button>
           </div>
         )}
       </Card>
