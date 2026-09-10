@@ -314,6 +314,7 @@ ALL_PERMS = [
 class LoginIn(BaseModel):
     username: str  # accepts username OR email address
     password: str
+    device_id: Optional[str] = None
 
 class UserIn(BaseModel):
     name: str
@@ -468,31 +469,61 @@ class SettingsIn(BaseModel):
 
 
 # ================= AUTH =================
+MAX_FAILED_ATTEMPTS = 5
+
 @api.post("/auth/login")
 async def login(data: LoginIn):
     ident = (data.username or "").strip()
+    incoming_device = (data.device_id or "").strip()
     # Accept username OR email. Email lookup is case-insensitive and tries
     # every matching user (admins first) so shared-email accounts still work.
     candidates: List[Dict[str, Any]] = []
     if "@" in ident:
         cursor = db.users.find({"email": {"$regex": f"^{_re.escape(ident)}$", "$options": "i"}})
         candidates = await cursor.to_list(20)
-        # admins first, then most-recently-active
         candidates.sort(key=lambda u: (0 if u.get("role") == "admin" else 1, -(len(u.get("last_login") or ""))))
     if not candidates:
         one = await db.users.find_one({"username": ident})
         if one:
             candidates = [one]
+    # If we found ANY user matching identifier, and they're locked, deny early
+    for cand in candidates:
+        if cand.get("locked_until") and cand["locked_until"] > now_iso():
+            raise HTTPException(status_code=423, detail=f"تم حظر الحساب بسبب تجاوز {MAX_FAILED_ATTEMPTS} محاولات دخول فاشلة. الرجاء التواصل مع مدير النظام لفك الحظر.")
     user = None
     for cand in candidates:
         if verify_password(data.password, cand.get("password_hash", "")):
             user = cand
             break
     if not user:
+        # Increment failed attempts on the FIRST matching candidate (or all if email)
+        for cand in candidates:
+            failed = (cand.get("failed_attempts") or 0) + 1
+            update = {"failed_attempts": failed, "last_failed_at": now_iso()}
+            if failed >= MAX_FAILED_ATTEMPTS:
+                update["locked_until"] = (datetime.now(timezone.utc) + timedelta(days=365)).isoformat()
+                update["locked_at"] = now_iso()
+                await db.notifications.insert_one({
+                    "id": str(uuid.uuid4()), "title": "تم حظر حساب مستخدم",
+                    "message": f"تم حظر حساب المستخدم {cand.get('username','')} بسبب تجاوز {MAX_FAILED_ATTEMPTS} محاولات دخول فاشلة.",
+                    "type": "warning", "category": "user_lock", "read": False, "created_at": now_iso(),
+                })
+            await db.users.update_one({"id": cand["id"]}, {"$set": update})
         raise HTTPException(status_code=401, detail="بيانات الدخول غير صحيحة")
     if user.get("status") == "disabled":
         raise HTTPException(status_code=403, detail="الحساب معطل")
-    await db.users.update_one({"id": user["id"]}, {"$set": {"last_login": now_iso()}})
+    # Device binding: first successful login binds; later logins must match
+    bound = user.get("bound_device")
+    if bound and incoming_device and bound != incoming_device:
+        raise HTTPException(
+            status_code=403,
+            detail="هذا الحساب مرتبط بجهاز آخر. يرجى استخدام الجهاز المرتبط أو التواصل مع مدير النظام لفك الربط.",
+        )
+    bind_update: Dict[str, Any] = {"last_login": now_iso(), "failed_attempts": 0, "locked_until": None}
+    if not bound and incoming_device:
+        bind_update["bound_device"] = incoming_device
+        bind_update["bound_device_at"] = now_iso()
+    await db.users.update_one({"id": user["id"]}, {"$set": bind_update})
     token = create_token(user["id"], user["username"])
     return {"token": token, "user": clean_doc({**user, "password_hash": None})}
 
@@ -942,26 +973,34 @@ async def customer_forgot(data: ForgotIn):
 class RegisterRequest(BaseModel):
     full_name: str
     phone: str
-    address: Optional[str] = ""
+    address: str
 
 @api.post("/public/customer/register-request")
 async def register_request(data: RegisterRequest):
-    if len(data.full_name.strip()) < 3:
-        raise HTTPException(status_code=400, detail="الاسم غير صحيح")
-    if len(data.phone.strip()) < 7:
+    name = (data.full_name or "").strip()
+    phone = (data.phone or "").strip()
+    address = (data.address or "").strip()
+    if len(name) < 3:
+        raise HTTPException(status_code=400, detail="الاسم الرباعي مطلوب (3 أحرف على الأقل)")
+    if len(name.split()) < 2:
+        raise HTTPException(status_code=400, detail="الرجاء إدخال الاسم الرباعي كاملاً")
+    if not phone or len(phone) < 7 or not phone.replace("+","").isdigit():
         raise HTTPException(status_code=400, detail="رقم الهاتف غير صحيح")
-    existing = await db.customers.find_one({"phone": data.phone.strip()}, {"_id": 1})
+    if len(address) < 2:
+        raise HTTPException(status_code=400, detail="العنوان مطلوب")
+    existing = await db.customers.find_one({"phone": phone}, {"_id": 1})
     if existing:
         raise HTTPException(status_code=400, detail="رقم الهاتف مرتبط بحساب عميل آخر.")
     doc = {
-        "id": str(uuid.uuid4()), "full_name": data.full_name, "phone": data.phone,
-        "address": data.address, "status": "pending", "created_at": now_iso(),
+        "id": str(uuid.uuid4()), "full_name": name, "phone": phone,
+        "address": address, "status": "pending", "created_at": now_iso(),
     }
     await db.register_requests.insert_one(doc)
     await db.notifications.insert_one({
         "id": str(uuid.uuid4()), "title": "طلب حساب جديد",
-        "message": f"{data.full_name} ({data.phone}) يطلب إنشاء حساب",
-        "type": "info", "read": False, "created_at": now_iso(),
+        "message": f"{name} ({phone}) — {address} — يطلب إنشاء حساب",
+        "type": "info", "category": "account_request", "ref_id": doc["id"],
+        "read": False, "created_at": now_iso(),
     })
     return {"ok": True}
 
@@ -1653,7 +1692,7 @@ async def create_expense(data: ExpenseIn, user=Depends(require_perm("expenses"))
     if not acc:
         raise HTTPException(status_code=404, detail="حساب المصروف غير موجود")
     number = await next_gwd_number()
-    when = f"{data.date}T00:00:00+00:00" if data.date else now_iso()
+    when = f"{data.date}T00:00:00+03:00" if data.date else now_iso()
     doc = {
         "id": str(uuid.uuid4()), "number": number,
         "account_id": data.account_id, "account_name": acc.get("name", ""),
@@ -1688,8 +1727,8 @@ async def cash_summary(
     """Compute cash box totals from all sources:
     IN  = cash sales + receipt vouchers + transfers TO cash
     OUT = payment vouchers + expenses + transfers FROM cash"""
-    s_iso = f"{start}T00:00:00+00:00" if start else None
-    e_iso = f"{end}T23:59:59+00:00" if end else None
+    s_iso = f"{start}T00:00:00+03:00" if start else None
+    e_iso = f"{end}T23:59:59+03:00" if end else None
 
     def in_range(iso: str) -> bool:
         if s_iso and iso < s_iso: return False
@@ -1739,8 +1778,8 @@ async def cash_statement(
     user=Depends(require_perm("receipts")),
 ):
     """Returns every cash-affecting movement in the window, ordered by date."""
-    s_iso = f"{start}T00:00:00+00:00" if start else None
-    e_iso = f"{end}T23:59:59+00:00" if end else None
+    s_iso = f"{start}T00:00:00+03:00" if start else None
+    e_iso = f"{end}T23:59:59+03:00" if end else None
     def q(base):
         if s_iso or e_iso:
             base["created_at"] = {}
@@ -1833,7 +1872,7 @@ async def create_transfer(data: TransferIn, user=Depends(require_perm("receipts"
     if data.dest_type in ("customer", "supplier"):
         await _adjust_party_balance(data.dest_type, data.dest_id, data.amount, number, desc_dst)
 
-    when = f"{data.date}T00:00:00+00:00" if data.date else now_iso()
+    when = f"{data.date}T00:00:00+03:00" if data.date else now_iso()
     doc = {
         "id": str(uuid.uuid4()), "number": number,
         "source_type": data.source_type, "source_id": data.source_id, "source_name": source_name,
@@ -1946,8 +1985,8 @@ async def report_item_movement(
     Movements: purchases (+), sales (-), card additions (+)."""
     cat = await db.card_categories.find_one({"id": category_id})
     if not cat: raise HTTPException(status_code=404, detail="الفئة غير موجودة")
-    s_iso = f"{start}T00:00:00+00:00" if start else None
-    e_iso = f"{end}T23:59:59+00:00" if end else None
+    s_iso = f"{start}T00:00:00+03:00" if start else None
+    e_iso = f"{end}T23:59:59+03:00" if end else None
 
     entries: List[Dict[str, Any]] = []
     # 1) Purchases (+)
@@ -2090,8 +2129,8 @@ async def account_statement(
 ):
     """Statement for any party: customer / pos / supplier / expense / cash.
     Returns account metadata, entries (with running balance), and totals."""
-    s_iso = f"{start}T00:00:00+00:00" if start else None
-    e_iso = f"{end}T23:59:59+00:00" if end else None
+    s_iso = f"{start}T00:00:00+03:00" if start else None
+    e_iso = f"{end}T23:59:59+03:00" if end else None
 
     account: Dict[str, Any] = {}
     entries: List[Dict[str, Any]] = []
@@ -2481,9 +2520,9 @@ async def public_my_orders(data: CardOrderHistoryIn):
     if data.start or data.end:
         rng: Dict[str, Any] = {}
         if data.start:
-            rng["$gte"] = f"{data.start}T00:00:00+00:00"
+            rng["$gte"] = f"{data.start}T00:00:00+03:00"
         if data.end:
-            rng["$lte"] = f"{data.end}T23:59:59+00:00"
+            rng["$lte"] = f"{data.end}T23:59:59+03:00"
         query["created_at"] = rng
     docs = await db.orders.find(query).sort("created_at", -1).limit(500).to_list(500)
     return [clean_doc(o) for o in docs]
@@ -2508,8 +2547,8 @@ async def public_customer_statement(data: StatementIn):
 
     base_q: Dict[str, Any] = {"party_type": "customer", "party_id": customer["id"]}
     opening_balance = 0.0
-    start_iso = f"{data.start}T00:00:00+00:00" if data.start else None
-    end_iso = f"{data.end}T23:59:59+00:00" if data.end else None
+    start_iso = f"{data.start}T00:00:00+03:00" if data.start else None
+    end_iso = f"{data.end}T23:59:59+03:00" if data.end else None
 
     if start_iso:
         # Compute opening balance from ALL entries before the start date
@@ -2531,7 +2570,7 @@ async def public_customer_statement(data: StatementIn):
             "debit": opening_balance if opening_balance > 0 else 0,
             "credit": abs(opening_balance) if opening_balance < 0 else 0,
             "balance": opening_balance,
-            "created_at": f"{data.start}T00:00:00+00:00",
+            "created_at": f"{data.start}T00:00:00+03:00",
         })
     # Re-compute running balance across the returned window starting from opening_balance
     running = opening_balance
@@ -2560,13 +2599,26 @@ async def list_orders(user=Depends(require_perm("card_orders"))):
 # ================= NOTIFICATIONS =================
 @api.get("/notifications")
 async def list_notifications(user=Depends(get_current_user)):
-    items = await db.notifications.find().sort("created_at", -1).limit(100).to_list(100)
+    items = await db.notifications.find().sort("created_at", -1).limit(200).to_list(200)
     return [clean_doc(n) for n in items]
 
 @api.post("/notifications/{nid}/read")
 async def mark_read(nid: str, user=Depends(get_current_user)):
     await db.notifications.update_one({"id": nid}, {"$set": {"read": True}})
     return {"ok": True}
+
+@api.post("/notifications/mark-category-read")
+async def mark_category_read(category: str, user=Depends(get_current_user)):
+    """Marks all unread notifications of a category as read.
+    Persists in DB so the counter does not come back after logout or refresh
+    unless new items arrive."""
+    if category not in ("account_request", "user_lock", "general"):
+        raise HTTPException(status_code=400, detail="فئة غير صحيحة")
+    r = await db.notifications.update_many(
+        {"category": category, "read": False},
+        {"$set": {"read": True, "read_at": now_iso(), "read_by": user.get("username")}},
+    )
+    return {"ok": True, "updated": r.modified_count}
 
 
 # ================= AUDIT =================
@@ -2721,6 +2773,30 @@ async def approve_register(rid: str, data: ApproveRegisterIn, user=Depends(requi
 @api.post("/register-requests/{rid}/reject")
 async def reject_register(rid: str, user=Depends(require_perm("customers"))):
     await db.register_requests.update_one({"id": rid}, {"$set": {"status": "rejected", "rejected_at": now_iso()}})
+    return {"ok": True}
+
+
+# ================= USER LOCK / DEVICE MGMT (ADMIN) =================
+@api.post("/users/{uid}/unlock")
+async def user_unlock(uid: str, user=Depends(require_perm("users"))):
+    u = await db.users.find_one({"id": uid})
+    if not u: raise HTTPException(status_code=404, detail="المستخدم غير موجود")
+    await db.users.update_one({"id": uid}, {"$set": {"failed_attempts": 0, "locked_until": None, "unlocked_at": now_iso(), "unlocked_by": user.get("username")}})
+    await audit_log(user, "unlock", "user", uid)
+    return {"ok": True}
+
+@api.post("/users/{uid}/reset-attempts")
+async def user_reset_attempts(uid: str, user=Depends(require_perm("users"))):
+    await db.users.update_one({"id": uid}, {"$set": {"failed_attempts": 0}})
+    await audit_log(user, "reset_attempts", "user", uid)
+    return {"ok": True}
+
+@api.post("/users/{uid}/unbind-device")
+async def user_unbind_device(uid: str, user=Depends(require_perm("users"))):
+    u = await db.users.find_one({"id": uid})
+    if not u: raise HTTPException(status_code=404, detail="المستخدم غير موجود")
+    await db.users.update_one({"id": uid}, {"$unset": {"bound_device": "", "bound_device_at": ""}, "$set": {"unbound_at": now_iso(), "unbound_by": user.get("username")}})
+    await audit_log(user, "unbind_device", "user", uid)
     return {"ok": True}
 
 

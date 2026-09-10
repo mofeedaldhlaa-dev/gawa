@@ -6,7 +6,7 @@ import { syncNow, getPending, isOnline } from "@/lib/offline";
 import { toast } from "sonner";
 import {
   LayoutDashboard, ShoppingCart, PackagePlus, Users, Truck, CreditCard,
-  Boxes, Receipt, Ticket, BarChart3, UserCog, Bell, ScrollText, Settings,
+  Boxes, Receipt, Ticket, BarChart3, UserCog, Bell, UserPlus, ScrollText, Settings,
   Menu, Wifi, WifiOff, LogOut, Search, FolderOpen, Wallet
 } from "lucide-react";
 
@@ -40,11 +40,14 @@ import api from "@/lib/api";
 
 function NotificationBell() {
   const [count, setCount] = useState(0);
+  const [reqCount, setReqCount] = useState(0);
   useEffect(() => {
     const fetch = async () => {
       try {
         const r = await api.get("/notifications");
-        setCount((r.data || []).filter((n) => !n.read).length);
+        const data = r.data || [];
+        setCount(data.filter((n) => !n.read && n.category !== "account_request").length);
+        setReqCount(data.filter((n) => !n.read && n.category === "account_request").length);
       } catch {}
     };
     fetch();
@@ -52,10 +55,16 @@ function NotificationBell() {
     return () => clearInterval(id);
   }, []);
   return (
-    <Link to="/notifications" className="relative p-2 hover:bg-slate-100 rounded" data-testid="bell-btn">
-      <Bell size={18} className="text-[#452480]" />
-      {count > 0 && <span className="absolute -top-0.5 -left-0.5 bg-red-500 text-white text-[10px] rounded-full min-w-[16px] h-4 px-1 flex items-center justify-center font-bold">{count}</span>}
-    </Link>
+    <div className="flex items-center gap-1">
+      <Link to="/notifications?tab=requests" className="relative p-2 hover:bg-amber-50 rounded" data-testid="requests-bell-btn" title="طلبات إنشاء الحساب">
+        <UserPlus size={18} className="text-amber-600" />
+        {reqCount > 0 && <span className="absolute -top-0.5 -left-0.5 bg-amber-500 text-white text-[10px] rounded-full min-w-[16px] h-4 px-1 flex items-center justify-center font-bold" data-testid="req-badge">{reqCount}</span>}
+      </Link>
+      <Link to="/notifications?tab=general" className="relative p-2 hover:bg-slate-100 rounded" data-testid="bell-btn" title="إشعارات النظام">
+        <Bell size={18} className="text-[#452480]" />
+        {count > 0 && <span className="absolute -top-0.5 -left-0.5 bg-red-500 text-white text-[10px] rounded-full min-w-[16px] h-4 px-1 flex items-center justify-center font-bold">{count}</span>}
+      </Link>
+    </div>
   );
 }
 

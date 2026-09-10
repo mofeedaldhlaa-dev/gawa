@@ -23,7 +23,7 @@ function CashBox() {
   useEffect(() => { load(); }, [start, end]);
   const apply = (p) => {
     setPeriod(p); const today = new Date();
-    if (p === "day") { setStart(_iso(_startOfToday())); setEnd(_iso(today)); }
+    if (p === "day") { const eod = new Date(today); eod.setHours(23,59,59,999); setStart(_iso(_startOfToday())); setEnd(_iso(eod)); }
     else if (p === "month") { setStart(_iso(_startOfMonth())); setEnd(_iso(today)); }
     else if (p === "year") { setStart(_iso(_startOfYear())); setEnd(_iso(today)); }
   };

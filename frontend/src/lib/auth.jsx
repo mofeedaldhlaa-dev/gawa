@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import api, { errText } from "./api";
+import { deviceId } from "./utils";
 
 const Ctx = createContext(null);
 
@@ -16,7 +17,7 @@ export const AuthProvider = ({ children }) => {
   const login = async (username, password) => {
     try {
       setError("");
-      const r = await api.post("/auth/login", { username, password });
+      const r = await api.post("/auth/login", { username, password, device_id: deviceId() });
       localStorage.setItem("jwd_token", r.data.token);
       setUser(r.data.user);
       return true;

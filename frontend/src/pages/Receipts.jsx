@@ -41,7 +41,7 @@ export default function Receipts() {
 
   const applyPeriod = (p) => {
     setPeriod(p); const today = new Date();
-    if (p === "day") { setRstart(_iso(_startOfToday())); setRend(_iso(today)); }
+    if (p === "day") { const eod = new Date(today); eod.setHours(23,59,59,999); setRstart(_iso(_startOfToday())); setRend(_iso(eod)); }
     else if (p === "month") { setRstart(_iso(_startOfMonth())); setRend(_iso(today)); }
     else if (p === "year") { setRstart(_iso(_startOfYear())); setRend(_iso(today)); }
   };

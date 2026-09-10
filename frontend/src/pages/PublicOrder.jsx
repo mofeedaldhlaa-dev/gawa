@@ -620,11 +620,19 @@ function RegisterForm({ onClose }) {
   const [loading, setLoading] = useState(false);
   const submit = async (e) => {
     e.preventDefault();
+    const name = (f.full_name || "").trim();
+    const phone = (f.phone || "").trim();
+    const address = (f.address || "").trim();
+    if (!name) { toast.error("الاسم الرباعي مطلوب"); return; }
+    if (name.split(/\s+/).length < 2) { toast.error("الرجاء إدخال الاسم الرباعي كاملاً"); return; }
+    if (!phone) { toast.error("رقم الهاتف مطلوب"); return; }
+    if (!/^\+?\d{7,15}$/.test(phone.replace(/\s/g, ""))) { toast.error("رقم الهاتف غير صحيح"); return; }
+    if (!address) { toast.error("العنوان مطلوب"); return; }
     setLoading(true);
     try {
-      await api.post("/public/customer/register-request", f);
+      await api.post("/public/customer/register-request", { full_name: name, phone, address });
       const now = new Date();
-      const msg = `طلب إنشاء حساب جديد\n\nاسم العميل: ${f.full_name}\nرقم الهاتف: ${f.phone}\nالعنوان: ${f.address || "-"}\n\nيرجى الموافقة على الطلب.\n\n${now.toLocaleString("en-GB")}`;
+      const msg = `طلب إنشاء حساب جديد\n\nاسم العميل: ${name}\nرقم الهاتف: ${phone}\nالعنوان: ${address}\n\nيرجى الموافقة على الطلب.\n\n${now.toLocaleString("en-GB")}`;
       openWhatsApp(ADMIN_WHATSAPP, msg);
       toast.success("تم إرسال الطلب، سيتم التواصل معك قريباً");
       onClose();
@@ -635,9 +643,19 @@ function RegisterForm({ onClose }) {
     <DialogContent>
       <DialogHeader><DialogTitle>إنشاء حساب جديد</DialogTitle></DialogHeader>
       <form onSubmit={submit} className="space-y-3">
-        <div><Label>الاسم الكامل</Label><Input value={f.full_name} onChange={(e) => setF({ ...f, full_name: e.target.value })} required data-testid="reg-name"/></div>
-        <div><Label>رقم الهاتف</Label><Input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} required data-testid="reg-phone"/></div>
-        <div><Label>العنوان</Label><Input value={f.address} onChange={(e) => setF({ ...f, address: e.target.value })} data-testid="reg-address"/></div>
+        <div>
+          <Label>الاسم الرباعي <span className="text-red-500">*</span></Label>
+          <Input value={f.full_name} onChange={(e) => setF({ ...f, full_name: e.target.value })} required placeholder="مثال: محمد أحمد علي سالم" data-testid="reg-name"/>
+        </div>
+        <div>
+          <Label>رقم الهاتف <span className="text-red-500">*</span></Label>
+          <Input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} required inputMode="tel" data-testid="reg-phone"/>
+        </div>
+        <div>
+          <Label>العنوان <span className="text-red-500">*</span></Label>
+          <Input value={f.address} onChange={(e) => setF({ ...f, address: e.target.value })} required placeholder="المدينة، الحي، أقرب معلم" data-testid="reg-address"/>
+        </div>
+        <div className="text-[11px] text-slate-500">جميع الحقول إجبارية (*)</div>
         <Button type="submit" disabled={loading} className="w-full bg-[#221340]" data-testid="reg-submit">{loading?"جاري...":"تسجيل"}</Button>
       </form>
     </DialogContent>

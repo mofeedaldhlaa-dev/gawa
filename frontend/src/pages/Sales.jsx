@@ -46,7 +46,7 @@ export default function Sales() {
   const applyPreset = (p) => {
     setPeriod(p);
     const today = new Date();
-    if (p === "day") { setStart(iso(startOfToday())); setEnd(iso(today)); }
+    if (p === "day") { const eod = new Date(today); eod.setHours(23,59,59,999); setStart(iso(startOfToday())); setEnd(iso(eod)); }
     else if (p === "month") { setStart(iso(startOfMonth())); setEnd(iso(today)); }
     else if (p === "year") { setStart(iso(startOfYear())); setEnd(iso(today)); }
   };
