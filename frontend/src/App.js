@@ -69,7 +69,7 @@ function NotificationBell() {
 }
 
 const menu = [
-  { path: "/", label: "لوحة التحكم", icon: LayoutDashboard, perm: "dashboard" },
+  { path: "/dashboard", label: "لوحة التحكم", icon: LayoutDashboard, perm: "dashboard" },
   { path: "/sales", label: "المبيعات", icon: ShoppingCart, perm: "sales" },
   { path: "/purchases", label: "المشتريات", icon: PackagePlus, perm: "purchases" },
   { path: "/customers", label: "العملاء", icon: Users, perm: "customers" },
@@ -139,7 +139,7 @@ function Shell({ children }) {
         </div>
         <nav className="flex-1 overflow-y-auto p-3 space-y-1">
           {items.map((m) => {
-            const active = location.pathname === m.path || (m.path !== "/" && location.pathname.startsWith(m.path));
+            const active = location.pathname === m.path || (m.path !== "/dashboard" && location.pathname.startsWith(m.path));
             return (
               <Link key={m.path} to={m.path}
                 data-testid={`nav-${m.perm}`}
@@ -222,7 +222,8 @@ function AppRoutes() {
       <Route path="/mof30" element={<Login />} />
       <Route path="/order-card" element={<PublicOrder />} />
       <Route path="/order" element={<PublicOrder />} />
-      <Route path="/" element={<Guard perm="dashboard"><Dashboard /></Guard>} />
+      <Route path="/" element={<PublicOrder />} />
+      <Route path="/dashboard" element={<Guard perm="dashboard"><Dashboard /></Guard>} />
       <Route path="/sales" element={<Guard perm="sales"><Sales /></Guard>} />
       <Route path="/sales/new" element={<Guard perm="sales"><SaleForm /></Guard>} />
       <Route path="/sales/:id/edit" element={<Guard perm="edit_ops"><SaleForm /></Guard>} />
@@ -247,7 +248,7 @@ function AppRoutes() {
       <Route path="/blocked" element={<Guard perm="customers"><BlockedCustomers /></Guard>} />
       <Route path="/settings" element={<Guard perm="settings"><SettingsPage /></Guard>} />
       <Route path="/files" element={<Guard perm="dashboard"><Files /></Guard>} />
-      <Route path="*" element={<Navigate to="/login" replace />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }

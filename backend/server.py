@@ -3443,11 +3443,69 @@ async def startup():
     await db.payment_requests.create_index("idempotency_key")
     await db.receipts.create_index("number", unique=True)
     await db.receipts.create_index("idempotency_key")
-    # Seed admin — DISABLED as of 2026-02 per user request:
-    # The admin account is no longer auto-created on every startup. The first
-    # user created through the normal flow is now the sole system admin. If the
-    # database happens to already contain an admin user we leave it exactly as
-    # is (no password reset, no permissions override).
+    # Seed admin — per-deploy default admin
+    # A brand-new default admin is created on every code update / redeploy.
+    # We identify a deploy by the SHA-256 of the running server.py file
+    # (changes on every code change). The `deployments` collection remembers
+    # which release_ids we have already seeded so restart within the same
+    # release does NOT create duplicates.
+    # Existing admins are NEVER modified, downgraded, deleted, or reset.
+    import hashlib, secrets as _secrets
+    try:
+        _server_path = os.path.abspath(__file__)
+        with open(_server_path, "rb") as _fh:
+            _server_bytes = _fh.read()
+        release_id = hashlib.sha256(_server_bytes).hexdigest()[:16]
+    except Exception:
+        release_id = os.environ.get("RELEASE_ID") or "unknown"
+
+    already_seeded = await db.deployments.find_one({"release_id": release_id})
+    if not already_seeded:
+        short = release_id[:6]
+        # Random unique username per deploy — prefix keeps them recognisable
+        while True:
+            candidate = f"admin_r{short}_{_secrets.token_hex(2)}"
+            if not await db.users.find_one({"username": candidate}):
+                break
+        # Fresh strong password (12 chars). Password_hash goes to DB; plaintext
+        # is written to server logs only (never returned to any client) so the
+        # operator can retrieve it from the log stream.
+        plain_pwd = _secrets.token_urlsafe(9)
+        new_admin_id = str(uuid.uuid4())
+        await db.users.insert_one({
+            "id": new_admin_id,
+            "name": f"مدير النظام (إصدار {short})",
+            "username": candidate,
+            "email": ADMIN_EMAIL,
+            "password_hash": hash_password(plain_pwd),
+            "role": "admin",
+            "status": "active",
+            "permissions": ALL_PERMS,
+            "created_at": now_iso(),
+            "created_by": "system-deploy-seed",
+            "release_id": release_id,
+        })
+        # Detach any test-only bindings on the new admin (fresh account so
+        # nothing should be bound, but we normalise the state to be safe):
+        await db.users.update_one(
+            {"id": new_admin_id},
+            {"$unset": {"bound_device": "", "bound_device_at": "", "locked_until": ""},
+             "$set": {"failed_attempts": 0}},
+        )
+        await db.deployments.insert_one({
+            "release_id": release_id,
+            "seeded_at": now_iso(),
+            "admin_username": candidate,
+            "admin_user_id": new_admin_id,
+        })
+        logger.warning(
+            f"[DEPLOY-SEED] release={release_id} created new default admin "
+            f"username={candidate}  password={plain_pwd}  "
+            f"(stored securely as bcrypt in DB; use once, then rotate)"
+        )
+    else:
+        logger.info(f"[DEPLOY-SEED] release={release_id} admin already seeded — skipping.")
+
     _existing_admin_any = await db.users.find_one({"role": "admin"})
     if not _existing_admin_any:
         logger.info("No admin user present; the FIRST user created via /api/users will become the system admin.")
@@ -3481,3 +3539,5 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# deploy marker 1789146047.5735972
