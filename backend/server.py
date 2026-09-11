@@ -918,11 +918,26 @@ class PasswordIn(BaseModel):
 async def admin_set_customer_password(cid: str, data: PasswordIn, user=Depends(require_perm("customers"))):
     if len(data.password) < 4:
         raise HTTPException(status_code=400, detail="كلمة المرور قصيرة جداً")
-    r = await db.customers.update_one({"id": cid}, {"$set": {"password": data.password}})
-    if r.matched_count == 0:
+    cust = await db.customers.find_one({"id": cid})
+    if not cust:
         raise HTTPException(status_code=404, detail="غير موجود")
-    await audit_log(user, "reset_password", "customer", cid)
-    return {"ok": True}
+    await db.customers.update_one({"id": cid}, {"$set": {"password": data.password}})
+    await audit_log(user, "reset_customer_password", "customer", cid, None, {"name": cust.get("name","")})
+    # WhatsApp URL for admin to click and notify the customer
+    from urllib.parse import quote
+    wa_phone = "".join(ch for ch in (cust.get("phone") or "") if ch.isdigit()).lstrip("0")
+    if wa_phone and not wa_phone.startswith("967"):
+        wa_phone = "967" + wa_phone
+    body = (
+        f"مرحباً {cust.get('name','')} 👋\n\n"
+        f"تم تعديل كلمة المرور الخاصة بحسابك في شبكة جواد نت اللاسلكية.\n\n"
+        f"📱 رقم الهاتف: {cust.get('phone','')}\n"
+        f"🔑 كلمة المرور الجديدة: {data.password}\n\n"
+        f"يرجى تسجيل الدخول باستخدام البيانات الجديدة.\n"
+        f"إذا لم تطلب هذا التعديل تواصل معنا فوراً."
+    )
+    wa_url = f"https://wa.me/{wa_phone}?text={quote(body)}" if wa_phone else ""
+    return {"ok": True, "whatsapp_url": wa_url}
 
 
 # Customer self-service password change
@@ -2623,19 +2638,44 @@ async def mark_category_read(category: str, user=Depends(get_current_user)):
 
 # ================= AUDIT =================
 @api.get("/audit")
-async def list_audit(user=Depends(require_perm("users"))):
-    items = await db.audit_logs.find().sort("created_at", -1).limit(500).to_list(500)
+async def list_audit(
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    q: Optional[str] = None,
+    user=Depends(require_perm("users")),
+):
+    """List audit entries. Optional YYYY-MM-DD `start`/`end` filter (Yemen TZ +03:00)
+    and free-text `q` search over username/action/entity."""
+    mongo_q: Dict[str, Any] = {}
+    if start or end:
+        rng: Dict[str, Any] = {}
+        if start: rng["$gte"] = f"{start}T00:00:00+03:00"
+        if end:   rng["$lte"] = f"{end}T23:59:59+03:00"
+        mongo_q["created_at"] = rng
+    if q and q.strip():
+        rx = {"$regex": _re.escape(q.strip()), "$options": "i"}
+        mongo_q["$or"] = [{"username": rx}, {"action": rx}, {"entity": rx}]
+    items = await db.audit_logs.find(mongo_q).sort("created_at", -1).limit(1000).to_list(1000)
     return [clean_doc(a) for a in items]
 
 
 # ================= REPORTS =================
 @api.get("/reports/dashboard")
 async def dashboard_stats(user=Depends(get_current_user)):
-    today = datetime.now(timezone.utc).date().isoformat()
-    month = datetime.now(timezone.utc).strftime("%Y-%m")
-    # Sales today/month
+    # Use Yemen local date so operations from 00:00 to 23:59 local time count
+    # in the correct day regardless of UTC crossovers.
+    now_yem = datetime.now(timezone.utc) + timedelta(hours=3)
+    today = now_yem.date().isoformat()
+    month = now_yem.strftime("%Y-%m")
+    day_start = f"{today}T00:00:00+03:00"
+    day_end = f"{today}T23:59:59+03:00"
+    # Sales today includes ALL types (cash + credit + electronic) — the sales
+    # collection stores every kind, so a single created_at filter is enough.
     sales_all = await db.sales.find({"status": "active"}).to_list(10000)
-    sales_today = sum(s["total"] for s in sales_all if s["created_at"][:10] == today)
+    sales_today = sum(
+        s["total"] for s in sales_all
+        if s.get("created_at","") >= day_start and s.get("created_at","") <= day_end
+    )
     sales_month = sum(s["total"] for s in sales_all if s["created_at"][:7] == month)
     purchases_all = await db.purchases.find({"status": "active"}).to_list(10000)
     purchases_total = sum(p["total"] for p in purchases_all)
@@ -2752,14 +2792,14 @@ async def approve_register(rid: str, data: ApproveRegisterIn, user=Depends(requi
     if not req: raise HTTPException(status_code=404, detail="غير موجود")
     if req.get("status") == "approved":
         raise HTTPException(status_code=400, detail="تمت الموافقة مسبقاً")
-    # Check if phone already exists
     exists = await db.customers.find_one({"phone": req["phone"]}, {"_id": 1})
     if exists:
         await db.register_requests.update_one({"id": rid}, {"$set": {"status": "duplicate", "approved_at": now_iso()}})
         raise HTTPException(status_code=400, detail="رقم الهاتف مرتبط بحساب عميل آخر.")
+    pwd = data.password or random_password()
     doc = {
         "id": str(uuid.uuid4()), "name": req["full_name"], "phone": req["phone"],
-        "address": req.get("address", ""), "password": data.password or random_password(),
+        "address": req.get("address", ""), "password": pwd,
         "credit_limit": data.credit_limit, "opening_balance": 0, "balance": 0,
         "notes": f"تمت الموافقة على طلب #{rid[:8]}", "status": "active",
         "customer_type": data.customer_type,
@@ -2767,8 +2807,23 @@ async def approve_register(rid: str, data: ApproveRegisterIn, user=Depends(requi
     }
     await db.customers.insert_one(doc)
     await db.register_requests.update_one({"id": rid}, {"$set": {"status": "approved", "approved_at": now_iso(), "customer_id": doc["id"]}})
-    await audit_log(user, "approve", "register_request", rid)
-    return {"ok": True, "customer": clean_doc(doc)}
+    await audit_log(user, "approve_register_request", "customer", doc["id"], None, {"name": doc["name"]})
+    # WhatsApp welcome message ready for the frontend to open
+    phone_digits = "".join(ch for ch in req["phone"] if ch.isdigit() or ch == "+")
+    wa_phone = phone_digits.lstrip("+").lstrip("0")
+    if not wa_phone.startswith("967"):
+        wa_phone = "967" + wa_phone
+    body = (
+        f"مرحباً بك {req['full_name']} 👋\n\n"
+        f"تم إنشاء حسابك بنجاح في شبكة جواد نت اللاسلكية.\n\n"
+        f"📱 رقم الهاتف: {req['phone']}\n"
+        f"🔑 كلمة المرور: {pwd}\n\n"
+        f"يمكنك الآن تسجيل الدخول وطلب الكروت مباشرة.\n"
+        f"نرحب بك في عائلة جواد نت — نتمنى لك تجربة رائعة."
+    )
+    from urllib.parse import quote
+    wa_url = f"https://wa.me/{wa_phone}?text={quote(body)}"
+    return {"ok": True, "customer": clean_doc(doc), "whatsapp_url": wa_url, "phone": req["phone"], "password": pwd}
 
 @api.post("/register-requests/{rid}/reject")
 async def reject_register(rid: str, user=Depends(require_perm("customers"))):
@@ -3172,8 +3227,20 @@ async def unbind_customer_device(cid: str, user=Depends(require_perm("customers"
         {"$set": {"bound_device": None, "bound_device_at": None},
          "$push": {"device_history": {"unbound_at": now_iso(), "unbound_by": user.get("username"), "was": old_device}}},
     )
-    await audit_log(user, "unbind_device", "customer", cid, {"bound_device": old_device}, {"bound_device": None})
-    return {"ok": True}
+    await audit_log(user, "unbind_customer_device", "customer", cid, {"name": doc.get("name",""), "phone": doc.get("phone","")}, None)
+    # Prepare WhatsApp notification the admin can send to the customer
+    from urllib.parse import quote
+    phone_digits = "".join(ch for ch in (doc.get("phone") or "") if ch.isdigit()).lstrip("0")
+    wa_phone = "967" + phone_digits if (phone_digits and not phone_digits.startswith("967")) else phone_digits
+    body = (
+        f"مرحباً {doc.get('name','')} 👋\n\n"
+        f"تم فك ربط جهازك السابق عن حسابك في شبكة جواد نت اللاسلكية.\n\n"
+        f"📱 رقم الهاتف: {doc.get('phone','')}\n\n"
+        f"يمكنك الآن تسجيل الدخول من جهاز جديد وسيتم ربطه تلقائياً بعد أول دخول ناجح.\n"
+        f"إذا لم تطلب هذه العملية فتواصل معنا فوراً."
+    )
+    wa_url = f"https://wa.me/{wa_phone}?text={quote(body)}" if wa_phone else ""
+    return {"ok": True, "whatsapp_url": wa_url}
 
 
 @api.get("/customers/{cid}/password")
@@ -3325,23 +3392,14 @@ async def startup():
     await db.payment_requests.create_index("idempotency_key")
     await db.receipts.create_index("number", unique=True)
     await db.receipts.create_index("idempotency_key")
-    # Seed admin
-    existing = await db.users.find_one({"username": ADMIN_USERNAME})
-    if not existing:
-        await db.users.insert_one({
-            "id": str(uuid.uuid4()),
-            "name": "مدير النظام",
-            "username": ADMIN_USERNAME,
-            "email": ADMIN_EMAIL,
-            "password_hash": hash_password(ADMIN_PASSWORD),
-            "role": "admin",
-            "status": "active",
-            "permissions": ALL_PERMS,
-            "created_at": now_iso(),
-        })
-        logger.info(f"Seeded admin: {ADMIN_USERNAME}")
-    else:
-        await db.users.update_one({"username": ADMIN_USERNAME}, {"$set": {"password_hash": hash_password(ADMIN_PASSWORD), "role": "admin", "permissions": ALL_PERMS, "status": "active"}})
+    # Seed admin — DISABLED as of 2026-02 per user request:
+    # The admin account is no longer auto-created on every startup. The first
+    # user created through the normal flow is now the sole system admin. If the
+    # database happens to already contain an admin user we leave it exactly as
+    # is (no password reset, no permissions override).
+    _existing_admin_any = await db.users.find_one({"role": "admin"})
+    if not _existing_admin_any:
+        logger.info("No admin user present; the FIRST user created via /api/users will become the system admin.")
     # Seed default categories if empty
     cats_count = await db.card_categories.count_documents({})
     if cats_count == 0:

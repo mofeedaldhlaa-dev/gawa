@@ -39,6 +39,7 @@ export default function PublicOrder() {
   const [recipientPhone, setRecipientPhone] = useState("");
   const [recipientName, setRecipientName] = useState("");
   const [pickingContact, setPickingContact] = useState(false);
+  const [sendMethod, setSendMethod] = useState("sms"); // sms | whatsapp
   const [loginError, setLoginError] = useState("");
   const [deviceMismatch, setDeviceMismatch] = useState(false);
   const [accountDisabled, setAccountDisabled] = useState(false);
@@ -209,7 +210,11 @@ export default function PublicOrder() {
 
   const sendCardSms = (recipient, cards, catName) => {
     const body = buildCardSmsBody(cards, catName, customer?.name);
-    openSMS(recipient, body);
+    if (sendMethod === "whatsapp") {
+      openWhatsApp(recipient, body);
+    } else {
+      openSMS(recipient, body);
+    }
   };
 
   const request = async () => {
@@ -285,10 +290,14 @@ export default function PublicOrder() {
 
   return (
     <div className="min-h-screen brand-gradient flex items-center justify-center p-4" data-testid="public-order">
-      <Card className="w-full max-w-md p-6 bg-white">
+      <Card className="w-full max-w-md p-6 bg-white shadow-2xl border-0 rounded-2xl">
         <div className="text-center mb-6">
-          <div className="text-xl font-black text-[#221340]">شبكة جواد نت اللاسلكية</div>
-          <div className="mt-4 inline-block bg-[#D4AF37] text-[#1A0F33] px-6 py-2 rounded-lg font-bold text-lg">طلب كرت</div>
+          <div className="text-2xl font-black text-[#221340] tracking-tight">شبكة جواد نت اللاسلكية</div>
+          <div className="mt-3 text-[15px] text-slate-600 leading-6">
+            مرحباً بك<br/>
+            <span className="text-[#452480] font-bold">قم بتسجيل الدخول</span>
+          </div>
+          <div className="mt-4 inline-block bg-gradient-to-l from-[#D4AF37] to-[#F2D06B] text-[#1A0F33] px-6 py-2 rounded-full font-bold text-lg shadow-md">طلب كرت</div>
         </div>
 
         {!customer && (
@@ -425,6 +434,19 @@ export default function PublicOrder() {
                       <span>الاسم: <strong>{recipientName}</strong></span>
                     </div>
                   )}
+                  <div>
+                    <div className="text-xs text-slate-600 mb-1">طريقة الإرسال</div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className={`flex items-center gap-2 border rounded-lg p-2 cursor-pointer text-sm ${sendMethod === "sms" ? "border-[#452480] bg-[#452480]/10 font-bold" : "border-slate-200"}`}>
+                        <input type="radio" name="send-method" checked={sendMethod === "sms"} onChange={() => setSendMethod("sms")} data-testid="po-send-sms"/>
+                        <span>رسالة نصية SMS</span>
+                      </label>
+                      <label className={`flex items-center gap-2 border rounded-lg p-2 cursor-pointer text-sm ${sendMethod === "whatsapp" ? "border-emerald-600 bg-emerald-50 font-bold" : "border-slate-200"}`}>
+                        <input type="radio" name="send-method" checked={sendMethod === "whatsapp"} onChange={() => setSendMethod("whatsapp")} data-testid="po-send-whatsapp"/>
+                        <span>واتساب</span>
+                      </label>
+                    </div>
+                  </div>
                   {!contactPickerSupported && (
                     <div className="text-[11px] text-slate-500">
                       اختيار جهات الاتصال متاح فقط في متصفح Chrome على أندرويد. يمكنك إدخال الرقم يدوياً.

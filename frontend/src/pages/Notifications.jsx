@@ -38,12 +38,16 @@ export default function Notifications() {
 
   const approve = async (rid) => {
     try {
-      await api.post(`/register-requests/${rid}/approve`, {
+      const r = await api.post(`/register-requests/${rid}/approve`, {
         credit_limit: Number(approveForm.credit_limit) || 0,
         customer_type: approveForm.customer_type,
         password: approveForm.password || null,
       });
       toast.success("تمت الموافقة وإنشاء الحساب");
+      // Auto-open WhatsApp welcome message if backend provided the URL
+      if (r.data.whatsapp_url) {
+        window.open(r.data.whatsapp_url, "_blank");
+      }
       setApprovingId(null);
       load();
     } catch (e) { toast.error(errText(e)); }
