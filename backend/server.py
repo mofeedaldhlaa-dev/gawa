@@ -1224,6 +1224,57 @@ async def cancel_sale(sid: str, user=Depends(require_perm("delete_ops"))):
     await audit_log(user, "cancel", "sale", sid)
     return {"ok": True}
 
+@api.delete("/sales/{sid}")
+async def delete_sale(sid: str, user=Depends(require_perm("delete_ops"))):
+    """Hard-delete a sale: reverse balance + inventory then remove the document."""
+    doc = await db.sales.find_one({"id": sid})
+    if not doc: raise HTTPException(status_code=404, detail="غير موجود")
+    # 1) reverse customer balance IF still active (only remaining unpaid part)
+    if doc.get("status") != "cancelled":
+        if doc.get("customer_id") and doc.get("remaining", 0) > 0:
+            await _adjust_party_balance("customer", doc["customer_id"], -doc["remaining"], doc.get("number",""), f"حذف فاتورة {doc.get('number','')}")
+        # 2) reverse inventory (put cards back to available; refund quantity stock)
+        await _reverse_sale_inventory(doc.get("items", []))
+    await db.sales.delete_one({"id": sid})
+    await audit_log(user, "delete", "sale", sid, {"number": doc.get("number"), "total": doc.get("total")}, None)
+    return {"ok": True}
+
+@api.delete("/purchases/{pid}")
+async def delete_purchase(pid: str, user=Depends(require_perm("delete_ops"))):
+    doc = await db.purchases.find_one({"id": pid})
+    if not doc: raise HTTPException(status_code=404, detail="غير موجود")
+    if doc.get("status") != "cancelled":
+        # Reverse supplier balance (increase what supplier owes us = decrease what we owe them)
+        if doc.get("supplier_id") and doc.get("remaining", 0) > 0:
+            await _adjust_party_balance("supplier", doc["supplier_id"], -doc["remaining"], doc.get("number",""), f"حذف فاتورة مشتريات {doc.get('number','')}")
+        # Reverse inventory (remove cards that were added; deduct qty)
+        for it in doc.get("items", []) or []:
+            cards = it.get("card_numbers") or []
+            if cards:
+                await db.cards.delete_many({"number": {"$in": cards}, "category_id": it.get("category_id")})
+            elif it.get("quantity"):
+                await db.stock.update_one({"category_id": it["category_id"]}, {"$inc": {"total": -it["quantity"]}})
+    await db.purchases.delete_one({"id": pid})
+    await audit_log(user, "delete", "purchase", pid, {"number": doc.get("number"), "total": doc.get("total")}, None)
+    return {"ok": True}
+
+@api.delete("/receipts/{rid}")
+async def delete_receipt(rid: str, user=Depends(require_perm("delete_ops"))):
+    doc = await db.receipts.find_one({"id": rid})
+    if not doc: raise HTTPException(status_code=404, detail="غير موجود")
+    if doc.get("status") != "cancelled":
+        # Receipt = we received money (customer paid us); reverse it by increasing customer balance back.
+        # Payment  = we paid money (paid a supplier);   reverse by decreasing supplier "us-pays" balance.
+        pty = doc.get("party_type")
+        pid = doc.get("party_id")
+        amt = doc.get("amount", 0)
+        if pty in ("customer","supplier") and pid and amt:
+            sign = +1 if doc.get("kind") == "receipt" else -1  # receipt reduced balance → add back
+            await _adjust_party_balance(pty, pid, sign * amt, doc.get("number",""), f"حذف {'قبض' if doc.get('kind')=='receipt' else 'صرف'} {doc.get('number','')}")
+    await db.receipts.delete_one({"id": rid})
+    await audit_log(user, "delete", "receipt", rid, {"number": doc.get("number"), "amount": doc.get("amount"), "kind": doc.get("kind")}, None)
+    return {"ok": True}
+
 
 class SaleEditIn(BaseModel):
     # legacy quick edit (still supported for partial updates)

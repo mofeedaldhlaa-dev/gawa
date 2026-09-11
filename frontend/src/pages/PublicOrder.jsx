@@ -361,6 +361,10 @@ export default function PublicOrder() {
 
         {customer && !result && (
           <div className="space-y-3">
+            <div className="text-center bg-gradient-to-l from-[#452480]/10 to-[#D4AF37]/20 border border-[#D4AF37]/40 rounded-xl p-3 shadow-sm" data-testid="po-welcome">
+              <div className="text-sm text-slate-600">مرحباً بك</div>
+              <div className="text-xl font-black text-[#221340] mt-1" data-testid="po-welcome-name">{customer.name}</div>
+            </div>
             <Card className="p-3 bg-slate-50">
               <div className="flex justify-between items-start">
                 <div>
@@ -580,31 +584,94 @@ export default function PublicOrder() {
       <Dialog open={showStmtDialog} onOpenChange={setShowStmtDialog}>
         <DialogContent className="max-w-md" data-testid="po-stmt-dialog">
           <DialogHeader><DialogTitle className="text-right">تحديد فترة كشف الحساب</DialogTitle></DialogHeader>
-          <div className="space-y-3 pt-2">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label>من تاريخ</Label>
-                <Input type="date" value={stmtStart} onChange={(e) => setStmtStart(e.target.value)} data-testid="po-stmt-start"/>
-              </div>
-              <div>
-                <Label>إلى تاريخ</Label>
-                <Input type="date" value={stmtEnd} onChange={(e) => setStmtEnd(e.target.value)} data-testid="po-stmt-end"/>
-              </div>
-            </div>
-            <div className="flex gap-2 flex-wrap text-xs">
-              <button type="button" onClick={() => { const d=new Date(); setStmtStart(new Date(d.getFullYear(),d.getMonth(),1).toISOString().slice(0,10)); setStmtEnd(d.toISOString().slice(0,10)); }} className="px-2 py-1 rounded border border-slate-300 hover:bg-slate-50" data-testid="po-stmt-preset-month">هذا الشهر</button>
-              <button type="button" onClick={() => { const d=new Date(); setStmtStart(new Date(d.getFullYear(),0,1).toISOString().slice(0,10)); setStmtEnd(d.toISOString().slice(0,10)); }} className="px-2 py-1 rounded border border-slate-300 hover:bg-slate-50" data-testid="po-stmt-preset-year">هذا العام</button>
-              <button type="button" onClick={() => { setStmtStart(""); setStmtEnd(""); }} className="px-2 py-1 rounded border border-slate-300 hover:bg-slate-50" data-testid="po-stmt-preset-all">كل الفترات</button>
-            </div>
-            <div className="flex gap-2 pt-2 border-t">
-              <Button onClick={() => runPrintStatement({ start: stmtStart, end: stmtEnd })} disabled={printingStmt} className="flex-1 bg-[#452480] hover:bg-[#5A2FA0]" data-testid="po-stmt-print">
-                <FileText size={14} className="ml-1"/> {printingStmt ? "جاري التحضير..." : "طباعة"}
-              </Button>
-              <Button variant="outline" onClick={() => setShowStmtDialog(false)}>إلغاء</Button>
-            </div>
-          </div>
+          <StatementPeriodPicker
+            onCancel={() => setShowStmtDialog(false)}
+            onPrint={(start, end) => runPrintStatement({ start, end })}
+            loading={printingStmt}
+          />
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+function StatementPeriodPicker({ onCancel, onPrint, loading }) {
+  const today = new Date();
+  const iso = (d) => d.toISOString().slice(0, 10);
+  const [mode, setMode] = useState("day"); // day | month | year
+  const [day, setDay] = useState(iso(today));
+  const [month, setMonth] = useState(String(today.getMonth() + 1).padStart(2, "0"));
+  const [year, setYear] = useState(String(today.getFullYear()));
+  const monthNames = ["يناير","فبراير","مارس","أبريل","مايو","يونيو","يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"];
+  const yearOptions = Array.from({ length: 10 }, (_, i) => String(today.getFullYear() - i));
+
+  const submit = () => {
+    if (mode === "day") {
+      onPrint(day, day); // same date on both ends — backend covers 00:00→23:59
+    } else if (mode === "month") {
+      const y = parseInt(year, 10);
+      const m = parseInt(month, 10);
+      const start = `${y}-${String(m).padStart(2, "0")}-01`;
+      const lastDay = new Date(y, m, 0).getDate(); // day 0 of next month = last day
+      const end = `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+      onPrint(start, end);
+    } else {
+      onPrint(`${year}-01-01`, `${year}-12-31`);
+    }
+  };
+
+  return (
+    <div className="space-y-3 pt-2">
+      <div className="grid grid-cols-3 gap-2" data-testid="po-stmt-mode">
+        {[["day","يومي"],["month","شهري"],["year","سنوي"]].map(([k,l]) => (
+          <button key={k} type="button" onClick={() => setMode(k)}
+            className={`py-2 rounded-lg border text-sm font-bold ${mode===k?"bg-[#452480] text-white border-[#452480]":"border-slate-300 hover:bg-slate-50"}`}
+            data-testid={`po-stmt-mode-${k}`}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {mode === "day" && (
+        <div>
+          <Label>التاريخ</Label>
+          <Input type="date" value={day} onChange={(e) => setDay(e.target.value)} data-testid="po-stmt-day"/>
+          <div className="text-[11px] text-slate-500 mt-1">
+            من: {day || "—"} &nbsp;·&nbsp; إلى: {day || "—"}
+          </div>
+        </div>
+      )}
+      {mode === "month" && (
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <Label>الشهر</Label>
+            <select value={month} onChange={(e) => setMonth(e.target.value)} className="w-full h-10 border rounded-md px-2 text-sm" data-testid="po-stmt-month">
+              {monthNames.map((n, i) => <option key={i+1} value={String(i+1).padStart(2,"0")}>{n}</option>)}
+            </select>
+          </div>
+          <div>
+            <Label>السنة</Label>
+            <select value={year} onChange={(e) => setYear(e.target.value)} className="w-full h-10 border rounded-md px-2 text-sm" data-testid="po-stmt-month-year">
+              {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
+        </div>
+      )}
+      {mode === "year" && (
+        <div>
+          <Label>السنة</Label>
+          <select value={year} onChange={(e) => setYear(e.target.value)} className="w-full h-10 border rounded-md px-2 text-sm" data-testid="po-stmt-year">
+            {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+      )}
+
+      <div className="flex gap-2 pt-3 border-t">
+        <Button onClick={submit} disabled={loading} className="flex-1 bg-[#452480] hover:bg-[#5A2FA0]" data-testid="po-stmt-print">
+          <FileText size={14} className="ml-1"/> {loading ? "جاري التحضير..." : "طباعة"}
+        </Button>
+        <Button variant="outline" onClick={onCancel}>إلغاء</Button>
+      </div>
     </div>
   );
 }

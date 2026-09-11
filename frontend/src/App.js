@@ -218,6 +218,8 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/mof" element={<Login />} />
+      <Route path="/mof30" element={<Login />} />
       <Route path="/order-card" element={<PublicOrder />} />
       <Route path="/order" element={<PublicOrder />} />
       <Route path="/" element={<Guard perm="dashboard"><Dashboard /></Guard>} />
