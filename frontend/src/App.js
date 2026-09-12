@@ -209,7 +209,7 @@ function Shell({ children }) {
 function Guard({ children, perm }) {
   const { user, hasPerm } = useAuth();
   if (user === undefined) return <div className="min-h-screen flex items-center justify-center text-slate-500">جاري التحميل...</div>;
-  if (user === null) return <Navigate to="/login" replace />;
+  if (user === null) return <Navigate to="/mof30" replace />;
   if (perm && !hasPerm(perm)) return <Shell><div className="p-8 text-center text-slate-500">لا تملك صلاحية الوصول إلى هذه الصفحة</div></Shell>;
   return <Shell>{children}</Shell>;
 }
@@ -217,8 +217,8 @@ function Guard({ children, perm }) {
 function AppRoutes() {
   return (
     <Routes>
-      <Route path="/login" element={<Login />} />
-      <Route path="/mof" element={<Login />} />
+      <Route path="/login" element={<Navigate to="/mof30" replace />} />
+      <Route path="/mof" element={<Navigate to="/mof30" replace />} />
       <Route path="/mof30" element={<Login />} />
       <Route path="/order-card" element={<PublicOrder />} />
       <Route path="/order" element={<PublicOrder />} />

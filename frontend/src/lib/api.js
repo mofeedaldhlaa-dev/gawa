@@ -31,9 +31,9 @@ api.interceptors.response.use(
       // Only redirect to admin login for ADMIN requests from ADMIN pages.
       // Customer-portal requests (/public/*) and pages (/order, /order-card)
       // must handle errors locally without any redirect.
-      if (!isPublicRequest(error) && !isCustomerPortalPage() && !window.location.pathname.includes("/login")) {
+      if (!isPublicRequest(error) && !isCustomerPortalPage() && !window.location.pathname.includes("/mof30")) {
         localStorage.removeItem("jwd_token");
-        window.location.href = "/login";
+        window.location.href = "/mof30";
       }
     }
     return Promise.reject(error);
