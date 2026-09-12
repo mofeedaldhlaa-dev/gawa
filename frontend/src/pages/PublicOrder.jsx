@@ -243,10 +243,10 @@ export default function PublicOrder() {
     setLoading(false);
   };
 
-  const loadHistory = async () => {
+  const loadHistory = async (s, e) => {
     setHistoryLoading(true);
     try {
-      const r = await api.post("/public/card-order/my-orders", { phone, password, start: startDate || null, end: endDate || null });
+      const r = await api.post("/public/card-order/my-orders", { phone, password, start: s || null, end: e || null });
       setHistory(r.data || []);
       if (!(r.data || []).length) toast.info("لا توجد طلبات في الفترة المحددة");
     } catch (e) { toast.error(errText(e)); }
@@ -294,13 +294,19 @@ export default function PublicOrder() {
         <div className="text-center mb-6">
           <div className="text-2xl font-black text-[#221340] tracking-tight">شبكة جواد نت اللاسلكية</div>
           {!customer && (
-            <div className="mt-3 text-[15px] text-slate-600 leading-6" data-testid="po-header-welcome">
-              مرحباً بك<br/>
-              <span className="text-[#452480] font-bold">قم بتسجيل الدخول</span>
-            </div>
+            <div className="mt-4 inline-block bg-gradient-to-l from-[#D4AF37] to-[#F2D06B] text-[#1A0F33] px-6 py-2 rounded-full font-bold text-lg shadow-md">طلب كرت</div>
           )}
-          <div className="mt-4 inline-block bg-gradient-to-l from-[#D4AF37] to-[#F2D06B] text-[#1A0F33] px-6 py-2 rounded-full font-bold text-lg shadow-md">طلب كرت</div>
+          {customer && (
+            <div className="mt-4 inline-block bg-gradient-to-l from-[#D4AF37] to-[#F2D06B] text-[#1A0F33] px-6 py-2 rounded-full font-bold text-lg shadow-md">طلب كرت</div>
+          )}
         </div>
+
+        {!customer && (
+          <div className="mb-4 text-center bg-gradient-to-l from-[#452480]/10 to-[#D4AF37]/20 border border-[#D4AF37]/40 rounded-xl p-3 shadow-sm" data-testid="po-header-welcome">
+            <div className="text-sm text-slate-600">مرحباً بك</div>
+            <div className="text-xl font-black text-[#221340] mt-1">قم بتسجيل الدخول</div>
+          </div>
+        )}
 
         {!customer && (
           <form onSubmit={login} className="space-y-3" data-testid="po-login-form" noValidate>
@@ -472,11 +478,14 @@ export default function PublicOrder() {
               </button>
               {showHistory && (
                 <div className="mt-3 space-y-3" data-testid="po-history">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <div><Label className="text-xs">من تاريخ</Label><Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} data-testid="po-history-start"/></div>
-                    <div><Label className="text-xs">إلى تاريخ</Label><Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} data-testid="po-history-end"/></div>
-                  </div>
-                  <Button onClick={loadHistory} disabled={historyLoading} variant="outline" className="w-full" data-testid="po-history-search"><Search size={14} className="ml-1"/> {historyLoading ? "جاري..." : "بحث"}</Button>
+                  <StatementPeriodPicker
+                    onCancel={() => setShowHistory(false)}
+                    onPrint={(s, e) => loadHistory(s, e)}
+                    loading={historyLoading}
+                    submitLabel="بحث"
+                    submitIcon={<Search size={14} className="ml-1"/>}
+                    hideCancel
+                  />
 
                   <div className="space-y-2">
                     {history.map((o) => (
@@ -597,37 +606,41 @@ export default function PublicOrder() {
   );
 }
 
-function StatementPeriodPicker({ onCancel, onPrint, loading }) {
+function StatementPeriodPicker({ onCancel, onPrint, loading, submitLabel, submitIcon, hideCancel }) {
   const today = new Date();
   const iso = (d) => d.toISOString().slice(0, 10);
-  const [mode, setMode] = useState("day"); // day | month | year
+  const [mode, setMode] = useState("day"); // day | month | year | custom
   const [day, setDay] = useState(iso(today));
   const [month, setMonth] = useState(String(today.getMonth() + 1).padStart(2, "0"));
   const [year, setYear] = useState(String(today.getFullYear()));
+  const [cStart, setCStart] = useState(iso(new Date(today.getFullYear(), today.getMonth(), 1)));
+  const [cEnd, setCEnd] = useState(iso(today));
   const monthNames = ["يناير","فبراير","مارس","أبريل","مايو","يونيو","يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"];
   const yearOptions = Array.from({ length: 10 }, (_, i) => String(today.getFullYear() - i));
 
   const submit = () => {
     if (mode === "day") {
-      onPrint(day, day); // same date on both ends — backend covers 00:00→23:59
+      onPrint(day, day);
     } else if (mode === "month") {
       const y = parseInt(year, 10);
       const m = parseInt(month, 10);
       const start = `${y}-${String(m).padStart(2, "0")}-01`;
-      const lastDay = new Date(y, m, 0).getDate(); // day 0 of next month = last day
+      const lastDay = new Date(y, m, 0).getDate();
       const end = `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
       onPrint(start, end);
-    } else {
+    } else if (mode === "year") {
       onPrint(`${year}-01-01`, `${year}-12-31`);
+    } else {
+      onPrint(cStart, cEnd);
     }
   };
 
   return (
     <div className="space-y-3 pt-2">
-      <div className="grid grid-cols-3 gap-2" data-testid="po-stmt-mode">
-        {[["day","يومي"],["month","شهري"],["year","سنوي"]].map(([k,l]) => (
+      <div className="grid grid-cols-4 gap-2" data-testid="po-stmt-mode">
+        {[["day","يومي"],["month","شهري"],["year","سنوي"],["custom","مخصص"]].map(([k,l]) => (
           <button key={k} type="button" onClick={() => setMode(k)}
-            className={`py-2 rounded-lg border text-sm font-bold ${mode===k?"bg-[#452480] text-white border-[#452480]":"border-slate-300 hover:bg-slate-50"}`}
+            className={`py-2 rounded-lg border text-xs font-bold ${mode===k?"bg-[#452480] text-white border-[#452480]":"border-slate-300 hover:bg-slate-50"}`}
             data-testid={`po-stmt-mode-${k}`}>
             {l}
           </button>
@@ -667,12 +680,18 @@ function StatementPeriodPicker({ onCancel, onPrint, loading }) {
           </select>
         </div>
       )}
+      {mode === "custom" && (
+        <div className="grid grid-cols-2 gap-2">
+          <div><Label>من تاريخ</Label><Input type="date" value={cStart} onChange={(e) => setCStart(e.target.value)} data-testid="po-stmt-custom-start"/></div>
+          <div><Label>إلى تاريخ</Label><Input type="date" value={cEnd} onChange={(e) => setCEnd(e.target.value)} data-testid="po-stmt-custom-end"/></div>
+        </div>
+      )}
 
       <div className="flex gap-2 pt-3 border-t">
         <Button onClick={submit} disabled={loading} className="flex-1 bg-[#452480] hover:bg-[#5A2FA0]" data-testid="po-stmt-print">
-          <FileText size={14} className="ml-1"/> {loading ? "جاري التحضير..." : "طباعة"}
+          {submitIcon || <FileText size={14} className="ml-1"/>} {loading ? "جاري..." : (submitLabel || "طباعة")}
         </Button>
-        <Button variant="outline" onClick={onCancel}>إلغاء</Button>
+        {!hideCancel && <Button variant="outline" onClick={onCancel}>إلغاء</Button>}
       </div>
     </div>
   );

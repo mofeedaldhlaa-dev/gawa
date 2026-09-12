@@ -9,53 +9,49 @@ Arabic (RTL) full-stack ERP for شبكة جواد نت اللاسلكية.
 - `/login`, `/mof`, unknown → fall through to `/`
 - `/dashboard` and all internal admin routes behind Guard
 
-## Phase 1-3 Comprehensive Update (2026-02) ✅
-### Delete flows (real delete with safety):
-- Customer/Supplier: hard-delete refused if any financial history (sales/purchases/receipts/ledger/balance), otherwise deletes cleanly. Arabic audit log ("حذف العميل: ...")
-- Sales/Purchases/Receipts/Expenses: existing cascade delete now with Arabic audit log messages ("حذف فاتورة مبيعات 125", "حذف سند قبض 100", etc.)
-- Unified confirmation dialog: "هل أنت متأكد من حذف هذا العنصر؟ لا يمكن التراجع عن عملية الحذف."
+## PublicOrder (Customer Portal)
+- Pre-login: shows unified welcome card ("مرحباً بك / قم بتسجيل الدخول") under the "طلب كرت" pill, same gradient design as post-login welcome.
+- Post-login data card: Account Type / Credit Limit / Debt / Available / Change Password / Print Statement (no name — name only in welcome card).
+- Previous Orders section: uses same daily/monthly/yearly/custom period picker as "طباعة كشف الحساب".
 
-### Unified date filters:
-- Daily/Monthly/Yearly/Custom on Sales, Purchases, Receipts, Expenses.
-- Yemen TZ +03:00 boundaries; daily = 00:00:00 to 23:59:59 of selected date.
-- Dashboard "sales_today" fixed to include cash+credit+electronic within same TZ window.
+## Delete flows (real delete with safety)
+- Customer/Supplier: hard-delete refused if any financial history, otherwise deletes cleanly.
+- Sales/Purchases/Receipts/Expenses: cascade delete reversing balance/inventory with Arabic audit messages.
+- Unified confirmation: "هل أنت متأكد من حذف هذا العنصر؟ لا يمكن التراجع عن عملية الحذف."
 
-### PublicOrder (customer portal):
-- Data card now shows: Account Type / Credit Limit / Debt / Available / Change Password / Print Statement.
-- Account name displayed ONLY in welcome card ("مرحباً بك <name>").
+## Unified Date Filters (Yemen +03:00)
+- Daily/Monthly/Yearly/Custom on Sales, Purchases, Receipts, Expenses, and customer statements/orders.
+- Dashboard `sales_today` matches daily sales report.
 
-### Notifications:
-- Bell counter shows unread only (existing behavior verified). Two icons: account_request bell + general bell.
+## Notifications
+- Bell counter shows unread only.
 
-### WhatsApp URLs:
-- POST /api/customers/{id}/password → returns wa_url
-- POST /api/customers/{id}/unbind-device → returns wa_url  
-- POST /api/public-blocks/{phone}/unblock → returns wa_url
-- Frontend auto-opens WhatsApp on success (window.open).
+## WhatsApp URLs (auto-open)
+- POST /api/customers/{id}/password → wa_url
+- POST /api/customers/{id}/unbind-device → wa_url
+- POST /api/public-blocks/{phone}/unblock → wa_url
 
-### PWA (Android installable):
-- /manifest.json with name/theme/icons (192/512 + maskable).
-- /service-worker.js network-first for API, cache-first for static.
-- Auto-registers on load. Works in browser and as installed app.
+## PWA
+- /manifest.json + /service-worker.js + icons (192/512 + maskable).
+- Installable on Android. Works in browser and as installed app.
 
-### Auth:
+## Auth
 - Admins strictly exempt from device-binding.
-- Login redirects to /dashboard (fixed setState-in-render warning).
-- Logout & 401 → /mof30.
+- Login → /dashboard. Logout & 401 → /mof30.
+- Customers device-bound (5 failed = block).
 
-## Auth Credentials
+## Credentials
 - MOFEED / EeFSWtdsFRBmb3p (18 permissions)
-- admin / admin123
-- MOF / admin123
-- Per-deploy admin auto-created and logged with [DEPLOY-SEED] prefix.
+- admin / admin123, MOF / admin123
+- Per-deploy admin auto-created (see backend.err.log `[DEPLOY-SEED]`).
 
 ## Backlog
-- P1: Refactor `/app/backend/server.py` (>3500 lines) into modular routers.
-- P2: Biometric (WebAuthn/Passkeys) login — pending. HTTPS domain required (works on preview + production deploy).
-- P2: Wrap delete_sale/delete_purchase in MongoDB transaction for atomicity.
-- P2: MongoDB Atlas migration (blocked on IP whitelist).
+- P1: Refactor server.py (>3600 lines) into modular routers.
+- P2: Biometric (WebAuthn/Passkeys) login.
+- P2: Wrap delete_sale/delete_purchase in MongoDB transaction.
+- P2: MongoDB Atlas migration.
 
-## Test Files
+## Test Reports
 - /app/backend/tests/test_admin_device_exempt.py
 - /app/backend/tests/test_iteration10_phase123.py — 13/13 PASS
 - /app/test_reports/iteration_10.json
