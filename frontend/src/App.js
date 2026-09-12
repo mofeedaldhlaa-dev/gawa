@@ -217,8 +217,6 @@ function Guard({ children, perm }) {
 function AppRoutes() {
   return (
     <Routes>
-      <Route path="/login" element={<Navigate to="/mof30" replace />} />
-      <Route path="/mof" element={<Navigate to="/mof30" replace />} />
       <Route path="/mof30" element={<Login />} />
       <Route path="/order-card" element={<PublicOrder />} />
       <Route path="/order" element={<PublicOrder />} />
