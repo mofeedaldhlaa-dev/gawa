@@ -4,54 +4,41 @@
 Arabic (RTL) full-stack ERP for شبكة جواد نت اللاسلكية.
 
 ## Routing
-- `/` (main), `/order`, `/order-card` → PublicOrder (customer card window)
-- `/mof30` → ONLY entry for Admin/Users login form
-- `/login`, `/mof`, unknown → fall through to `/`
-- `/dashboard` and all internal admin routes behind Guard
+- `/` → PublicOrder (customer card window). Only entry for customers.
+- `/mof30` → ONLY entry for Admin/Users login.
+- `/login`, `/mof`, unknown → redirect to `/`.
 
-## PublicOrder (Customer Portal)
-- Pre-login: shows unified welcome card ("مرحباً بك / قم بتسجيل الدخول") under the "طلب كرت" pill, same gradient design as post-login welcome.
-- Post-login data card: Account Type / Credit Limit / Debt / Available / Change Password / Print Statement (no name — name only in welcome card).
-- Previous Orders section: uses same daily/monthly/yearly/custom period picker as "طباعة كشف الحساب".
+## Recent Delivery (2026-02, iter 11)
+### ✅ Statement cleanup (Item 1 of the big update)
+- Editing / deleting a sale, purchase, or receipt no longer inserts extra "تعديل / حذف / عكس" rows into the customer/supplier ledger.
+- Uses new helper `_remove_ledger_by_op(party_type, party_id, op_number)` — removes the original ledger entry(ies) and adjusts the party balance in place.
+- Applied to: `delete_sale`, `delete_purchase`, `delete_receipt`, `edit_sale` (full + quick), `edit_receipt`.
+- Audit log still records the operation (who + when + before/after) — statement remains clean.
 
-## Delete flows (real delete with safety)
-- Customer/Supplier: hard-delete refused if any financial history, otherwise deletes cleanly.
-- Sales/Purchases/Receipts/Expenses: cascade delete reversing balance/inventory with Arabic audit messages.
-- Unified confirmation: "هل أنت متأكد من حذف هذا العنصر؟ لا يمكن التراجع عن عملية الحذف."
+### ✅ Bank Accounts (Items 9-11)
+- New collection `bank_accounts` and CRUD endpoints (`/api/bank-accounts`, GET filter `show_in=`).
+- New admin page `/bank-accounts`.
+- Per-bank visibility flags: `invoices` / `receipts` / `payment_requests` / `over_limit`.
+- Print output (Sales/Purchases invoices + Receipts) now appends a "للسداد عبر:" section with all active banks whose `show_in` matches — gold-accent card style, works in browser print.
+- Inactive banks or banks not tagged for a location never appear.
+- Sales.jsx / Purchases.jsx / Receipts.jsx now fetch `/bank-accounts` and pass `banks` to the print helpers.
 
-## Unified Date Filters (Yemen +03:00)
-- Daily/Monthly/Yearly/Custom on Sales, Purchases, Receipts, Expenses, and customer statements/orders.
-- Dashboard `sales_today` matches daily sales report.
-
-## Notifications
-- Bell counter shows unread only.
-
-## WhatsApp URLs (auto-open)
-- POST /api/customers/{id}/password → wa_url
-- POST /api/customers/{id}/unbind-device → wa_url
-- POST /api/public-blocks/{phone}/unblock → wa_url
-
-## PWA
-- /manifest.json + /service-worker.js + icons (192/512 + maskable).
-- Installable on Android. Works in browser and as installed app.
+## Backlog from the big update (still to do — Phase 2 of this request)
+- **Item 2**: Special sale prices per customer / POS (independent price maps + toggle "تفعيل سعر خاص").
+- **Items 3-8**: Incentives system (rules per customer / POS, auto-earning on sale, exclude special-price accounts, redeem as card or credit from PublicOrder).
 
 ## Auth
 - Admins strictly exempt from device-binding.
 - Login → /dashboard. Logout & 401 → /mof30.
 - Customers device-bound (5 failed = block).
 
+## PWA
+- /manifest.json + /service-worker.js + icons — installable on Android.
+
 ## Credentials
 - MOFEED / EeFSWtdsFRBmb3p (18 permissions)
 - admin / admin123, MOF / admin123
 - Per-deploy admin auto-created (see backend.err.log `[DEPLOY-SEED]`).
 
-## Backlog
-- P1: Refactor server.py (>3600 lines) into modular routers.
-- P2: Biometric (WebAuthn/Passkeys) login.
-- P2: Wrap delete_sale/delete_purchase in MongoDB transaction.
-- P2: MongoDB Atlas migration.
-
 ## Test Reports
-- /app/backend/tests/test_admin_device_exempt.py
-- /app/backend/tests/test_iteration10_phase123.py — 13/13 PASS
-- /app/test_reports/iteration_10.json
+- /app/test_reports/iteration_10.json — 13/13 PASS

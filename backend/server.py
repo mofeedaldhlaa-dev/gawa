@@ -706,6 +706,51 @@ async def customer_statement(cid: str, user=Depends(require_perm("customers"))):
     return {"customer": clean_doc(customer), "entries": [clean_doc(e) for e in entries]}
 
 
+# ================= BANK ACCOUNTS =================
+class BankAccountIn(BaseModel):
+    bank_name: str
+    holder_name: str
+    account_number: str
+    details: Optional[str] = ""
+    active: Optional[bool] = True
+    show_in: Optional[List[str]] = []  # ["invoices","receipts","payment_requests","over_limit"]
+
+@api.get("/bank-accounts")
+async def list_bank_accounts(show_in: Optional[str] = None, user=Depends(get_current_user)):
+    q: Dict[str, Any] = {}
+    if show_in:
+        q["show_in"] = show_in
+        q["active"] = True
+    items = await db.bank_accounts.find(q).sort("created_at", 1).to_list(500)
+    return [clean_doc(b) for b in items]
+
+@api.post("/bank-accounts")
+async def create_bank_account(data: BankAccountIn, user=Depends(require_perm("settings"))):
+    doc = data.model_dump()
+    doc["id"] = str(uuid.uuid4())
+    doc["created_at"] = now_iso()
+    await db.bank_accounts.insert_one(doc)
+    await audit_log(user, f"إنشاء حساب بنكي: {data.bank_name}", "bank_account", doc["id"])
+    return clean_doc(doc)
+
+@api.put("/bank-accounts/{bid}")
+async def update_bank_account(bid: str, data: BankAccountIn, user=Depends(require_perm("settings"))):
+    r = await db.bank_accounts.update_one({"id": bid}, {"$set": data.model_dump()})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="غير موجود")
+    await audit_log(user, f"تعديل حساب بنكي: {data.bank_name}", "bank_account", bid)
+    doc = await db.bank_accounts.find_one({"id": bid})
+    return clean_doc(doc)
+
+@api.delete("/bank-accounts/{bid}")
+async def delete_bank_account(bid: str, user=Depends(require_perm("settings"))):
+    doc = await db.bank_accounts.find_one({"id": bid})
+    if not doc: raise HTTPException(status_code=404, detail="غير موجود")
+    await db.bank_accounts.delete_one({"id": bid})
+    await audit_log(user, f"حذف حساب بنكي: {doc.get('bank_name','')}", "bank_account", bid)
+    return {"ok": True}
+
+
 # ================= SUPPLIERS =================
 @api.get("/suppliers")
 async def list_suppliers(user=Depends(require_perm("suppliers"))):
@@ -1119,6 +1164,22 @@ async def _adjust_party_balance(party_type: str, party_id: str, amount: float, o
     return new_balance
 
 
+async def _remove_ledger_by_op(party_type: str, party_id: str, op_number: str):
+    """Delete ALL ledger entries linked to an operation (used on edit/delete).
+    Keeps the statement clean of 'تعديل/حذف/عكس' entries. Returns the net delta removed
+    so the caller can update the party balance accordingly."""
+    if not op_number: return 0.0
+    entries = await db.ledger.find({"party_type": party_type, "party_id": party_id, "op_number": op_number}).to_list(500)
+    delta = sum(float(e.get("debit", 0) or 0) - float(e.get("credit", 0) or 0) for e in entries)
+    if entries:
+        await db.ledger.delete_many({"party_type": party_type, "party_id": party_id, "op_number": op_number})
+    collection = db.customers if party_type == "customer" else db.suppliers
+    doc = await collection.find_one({"id": party_id})
+    if doc:
+        await collection.update_one({"id": party_id}, {"$set": {"balance": float(doc.get("balance", 0) or 0) - delta}})
+    return delta
+
+
 @api.post("/sales")
 async def create_sale(data: SaleIn, user=Depends(require_perm("sales"))):
     # Idempotency
@@ -1261,14 +1322,13 @@ async def cancel_sale(sid: str, user=Depends(require_perm("delete_ops"))):
 
 @api.delete("/sales/{sid}")
 async def delete_sale(sid: str, user=Depends(require_perm("delete_ops"))):
-    """Hard-delete a sale: reverse balance + inventory then remove the document."""
+    """Hard-delete a sale: remove original ledger entry (keeps statement clean),
+    reverse inventory, then remove the document."""
     doc = await db.sales.find_one({"id": sid})
     if not doc: raise HTTPException(status_code=404, detail="غير موجود")
-    # 1) reverse customer balance IF still active (only remaining unpaid part)
     if doc.get("status") != "cancelled":
-        if doc.get("customer_id") and doc.get("remaining", 0) > 0:
-            await _adjust_party_balance("customer", doc["customer_id"], -doc["remaining"], doc.get("number",""), f"حذف فاتورة {doc.get('number','')}")
-        # 2) reverse inventory (put cards back to available; refund quantity stock)
+        if doc.get("customer_id") and doc.get("number"):
+            await _remove_ledger_by_op("customer", doc["customer_id"], doc["number"])
         await _reverse_sale_inventory(doc.get("items", []))
     await db.sales.delete_one({"id": sid})
     await audit_log(user, f"حذف فاتورة مبيعات {doc.get('number','')}", "sale", sid, {"number": doc.get("number"), "total": doc.get("total")}, None)
@@ -1279,10 +1339,8 @@ async def delete_purchase(pid: str, user=Depends(require_perm("delete_ops"))):
     doc = await db.purchases.find_one({"id": pid})
     if not doc: raise HTTPException(status_code=404, detail="غير موجود")
     if doc.get("status") != "cancelled":
-        # Reverse supplier balance (increase what supplier owes us = decrease what we owe them)
-        if doc.get("supplier_id") and doc.get("remaining", 0) > 0:
-            await _adjust_party_balance("supplier", doc["supplier_id"], -doc["remaining"], doc.get("number",""), f"حذف فاتورة مشتريات {doc.get('number','')}")
-        # Reverse inventory (remove cards that were added; deduct qty)
+        if doc.get("supplier_id") and doc.get("number"):
+            await _remove_ledger_by_op("supplier", doc["supplier_id"], doc["number"])
         for it in doc.get("items", []) or []:
             cards = it.get("card_numbers") or []
             if cards:
@@ -1298,14 +1356,9 @@ async def delete_receipt(rid: str, user=Depends(require_perm("delete_ops"))):
     doc = await db.receipts.find_one({"id": rid})
     if not doc: raise HTTPException(status_code=404, detail="غير موجود")
     if doc.get("status") != "cancelled":
-        # Receipt = we received money (customer paid us); reverse it by increasing customer balance back.
-        # Payment  = we paid money (paid a supplier);   reverse by decreasing supplier "us-pays" balance.
-        pty = doc.get("party_type")
-        pid = doc.get("party_id")
-        amt = doc.get("amount", 0)
-        if pty in ("customer","supplier") and pid and amt:
-            sign = +1 if doc.get("kind") == "receipt" else -1  # receipt reduced balance → add back
-            await _adjust_party_balance(pty, pid, sign * amt, doc.get("number",""), f"حذف {'قبض' if doc.get('kind')=='receipt' else 'صرف'} {doc.get('number','')}")
+        pty = doc.get("party_type"); pid = doc.get("party_id")
+        if pty in ("customer","supplier") and pid and doc.get("number"):
+            await _remove_ledger_by_op(pty, pid, doc["number"])
     kind_ar = "قبض" if doc.get("kind") == "receipt" else "صرف"
     await db.receipts.delete_one({"id": rid})
     await audit_log(user, f"حذف سند {kind_ar} {doc.get('number','')}", "receipt", rid, {"number": doc.get("number"), "amount": doc.get("amount"), "kind": doc.get("kind")}, None)
@@ -1354,13 +1407,10 @@ async def edit_sale(sid: str, data: SaleEditIn, user=Depends(require_perm("edit_
         new_sale_type = data.sale_type or doc.get("sale_type", "credit")
         if new_sale_type not in ("cash", "credit"):
             raise HTTPException(status_code=400, detail="نوع الفاتورة غير صحيح")
-        # 1) reverse OLD inventory + balance
+        # 1) remove OLD ledger entries + revert balance (keeps statement clean of reversal noise)
         await _reverse_sale_inventory(doc.get("items") or [])
-        if doc.get("customer_id") and doc.get("remaining", 0):
-            await _adjust_party_balance(
-                "customer", doc["customer_id"], -float(doc.get("remaining") or 0),
-                doc["number"], f"عكس تأثير الفاتورة {doc['number']} للتعديل",
-            )
+        if doc.get("customer_id") and doc.get("number"):
+            await _remove_ledger_by_op("customer", doc["customer_id"], doc["number"])
         # 2) compute new totals
         subtotal = 0.0
         items_final = []
@@ -1461,7 +1511,10 @@ async def edit_sale(sid: str, data: SaleEditIn, user=Depends(require_perm("edit_
             limit = customer.get("credit_limit", 0)
             if limit > 0 and customer.get("balance", 0) + diff > limit:
                 raise HTTPException(status_code=400, detail="التعديل يتجاوز سقف حساب العميل")
-        await _adjust_party_balance("customer", doc["customer_id"], diff, doc["number"], f"تعديل فاتورة {doc['number']}")
+        # Replace old ledger entry in place (no extra "تعديل" row in statement)
+        await _remove_ledger_by_op("customer", doc["customer_id"], doc["number"])
+        if new_remaining > 0:
+            await _adjust_party_balance("customer", doc["customer_id"], new_remaining, doc["number"], f"فاتورة مبيعات {doc['number']}")
     update = {"discount": new_discount, "paid": new_paid, "total": new_total, "remaining": new_remaining,
               "notes": data.notes if data.notes is not None else doc.get("notes"),
               "edited_at": now_iso(), "edited_by": user.get("username")}
@@ -1482,9 +1535,12 @@ async def edit_receipt(rid: str, data: ReceiptEditIn, user=Depends(require_perm(
     new_amount = data.amount if data.amount is not None else old_amount
     diff = new_amount - old_amount
     if diff != 0:
-        # receipts subtract from balance; increasing amount subtracts more (negative delta)
+        # Rewrite the receipt's ledger entry in place (no extra "تعديل سند" row).
+        pty = doc.get("party_type"); pid = doc.get("party_id")
+        await _remove_ledger_by_op(pty, pid, doc.get("number",""))
         sign = -1 if doc.get("kind") in ("receipt", "payment") else 1
-        await _adjust_party_balance(doc["party_type"], doc["party_id"], sign * diff, doc["number"], f"تعديل سند {doc['number']}")
+        kind_ar = "قبض" if doc.get("kind") == "receipt" else "صرف"
+        await _adjust_party_balance(pty, pid, sign * new_amount, doc["number"], f"سند {kind_ar} {doc['number']}")
     update = {"amount": new_amount,
               "description": data.description if data.description is not None else doc.get("description"),
               "edited_at": now_iso(), "edited_by": user.get("username")}

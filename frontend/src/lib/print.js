@@ -121,7 +121,23 @@ export const openPrintWindow = (html) => {
   w.document.close();
 };
 
-export const printSaleInvoice = ({ sale, customer, username }) => {
+const buildBanksBlock = (banks, where) => {
+  const list = (banks || []).filter((b) => b.active && (b.show_in || []).includes(where));
+  if (!list.length) return "";
+  const rows = list.map((b) => `
+    <div style="border:1px solid #D4AF37;border-right:4px solid #D4AF37;background:#FFFCF3;padding:3mm 4mm;margin-top:3mm;border-radius:2mm">
+      <div style="font-weight:700;color:#221340">${b.bank_name}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:2mm 6mm;margin-top:2mm;font-size:11px">
+        <div><span style="color:#666">اسم الحساب: </span><span style="font-weight:700">${b.holder_name || "-"}</span></div>
+        <div><span style="color:#666">رقم الحساب: </span><span style="font-family:monospace;font-weight:700">${b.account_number || "-"}</span></div>
+      </div>
+      ${b.details ? `<div style="margin-top:1mm;color:#555;font-size:10px;white-space:pre-line">${b.details}</div>` : ""}
+    </div>
+  `).join("");
+  return `<div style="margin-top:6mm"><div style="font-weight:700;color:#221340;margin-bottom:1mm">للسداد عبر:</div>${rows}</div>`;
+};
+
+export const printSaleInvoice = ({ sale, customer, username, banks }) => {
   const itemsRows = (sale.items || []).map((it, i) => {
     const numbers = (it.card_numbers || []).join(", ");
     return `<tr>
@@ -162,12 +178,13 @@ export const printSaleInvoice = ({ sale, customer, username }) => {
       <div class="row grand"><span>المتبقي</span><span class="num">${fmt(sale.remaining)}</span></div>
       ${customer ? `<div class="row"><span>إجمالي الرصيد المستحق</span><span class="num">${fmt(customer.balance || 0)}</span></div>` : ""}
     </div>
+    ${buildBanksBlock(banks, "invoices")}
     ${buildFooter(username)}
   `;
   openPrintWindow(html);
 };
 
-export const printPurchase = ({ purchase, supplier, username }) => {
+export const printPurchase = ({ purchase, supplier, username, banks }) => {
   const itemsRows = (purchase.items || []).map((it, i) => `<tr>
     <td>${i + 1}</td><td>${it.category_name || ""}</td>
     <td class="num">${it.quantity}</td><td class="num">${fmt(it.price)}</td><td class="num">${fmt(it.total)}</td>
@@ -191,12 +208,13 @@ export const printPurchase = ({ purchase, supplier, username }) => {
       <div class="row"><span>المدفوع</span><span class="num">${fmt(purchase.paid)}</span></div>
       <div class="row grand"><span>المتبقي</span><span class="num">${fmt(purchase.remaining)}</span></div>
     </div>
+    ${buildBanksBlock(banks, "invoices")}
     ${buildFooter(username)}
   `;
   openPrintWindow(html);
 };
 
-export const printReceipt = ({ receipt, party, username }) => {
+export const printReceipt = ({ receipt, party, username, banks }) => {
   const dir = receipt.kind === "receipt" ? "لكم" : "عليكم";
   const label = receipt.kind === "receipt" ? "سند قبض" : "سند صرف";
   const html = `
@@ -214,6 +232,7 @@ export const printReceipt = ({ receipt, party, username }) => {
       <div class="row grand"><span>الرصيد بعد السند</span><span class="num">${fmt(receipt.balance_after || 0)}</span></div>
     </div>
     ${receipt.description ? `<div style="margin-top:5mm;padding:3mm;background:#FAF7FF;border-right:3px solid #D4AF37"><strong>التفاصيل:</strong><br/>${receipt.description}</div>` : ""}
+    ${buildBanksBlock(banks, "receipts")}
     ${buildFooter(username)}
   `;
   openPrintWindow(html);

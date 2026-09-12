@@ -35,6 +35,7 @@ import SettingsPage from "@/pages/Settings";
 import PublicOrder from "@/pages/PublicOrder";
 import BlockedCustomers from "@/pages/BlockedCustomers";
 import Files from "@/pages/Files";
+import BankAccounts from "@/pages/BankAccounts";
 import "@/index.css";
 import api from "@/lib/api";
 
@@ -79,6 +80,7 @@ const menu = [
   { path: "/stock", label: "المخزون", icon: Boxes, perm: "stock" },
   { path: "/receipts", label: "السندات", icon: Receipt, perm: "receipts" },
   { path: "/expenses", label: "المصروفات", icon: Wallet, perm: "expenses" },
+  { path: "/bank-accounts", label: "الحسابات البنكية", icon: Wallet, perm: "settings" },
   { path: "/orders", label: "طلبات الكروت", icon: Ticket, perm: "card_orders" },
   { path: "/reports", label: "التقارير", icon: BarChart3, perm: "reports" },
   { path: "/users", label: "المستخدمون", icon: UserCog, perm: "users" },
@@ -246,6 +248,7 @@ function AppRoutes() {
       <Route path="/blocked" element={<Guard perm="customers"><BlockedCustomers /></Guard>} />
       <Route path="/settings" element={<Guard perm="settings"><SettingsPage /></Guard>} />
       <Route path="/files" element={<Guard perm="dashboard"><Files /></Guard>} />
+      <Route path="/bank-accounts" element={<Guard perm="settings"><BankAccounts /></Guard>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

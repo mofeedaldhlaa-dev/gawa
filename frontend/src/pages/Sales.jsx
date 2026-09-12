@@ -27,6 +27,7 @@ export default function Sales() {
   const { user } = useAuth();
   const [items, setItems] = useState([]);
   const [customers, setCustomers] = useState([]);
+  const [banks, setBanks] = useState([]);
   const [q, setQ] = useState("");
   const [viewing, setViewing] = useState(null);
   const [settings, setSettings] = useState({ company_name: "شبكة جواد نت اللاسلكية" });
@@ -41,6 +42,7 @@ export default function Sales() {
     load();
     api.get("/customers").then((r) => setCustomers(r.data));
     api.get("/settings").then((r) => setSettings(r.data));
+    api.get("/bank-accounts").then((r) => setBanks(r.data)).catch(() => {});
   }, [q]);
 
   const applyPreset = (p) => {
@@ -75,7 +77,7 @@ export default function Sales() {
 
   const doPrint = (s) => {
     const customer = customers.find((c) => c.id === s.customer_id);
-    printSaleInvoice({ sale: s, customer, username: user?.name || user?.username });
+    printSaleInvoice({ sale: s, customer, username: user?.name || user?.username, banks });
   };
 
   const removeSale = async (s) => {

@@ -14,14 +14,19 @@ export default function Purchases() {
   const { user } = useAuth();
   const [items, setItems] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
+  const [banks, setBanks] = useState([]);
   const [viewing, setViewing] = useState(null);
 
   const load = () => api.get("/purchases").then((r) => setItems(r.data));
-  useEffect(() => { load(); api.get("/suppliers").then((r) => setSuppliers(r.data)); }, []);
+  useEffect(() => {
+    load();
+    api.get("/suppliers").then((r) => setSuppliers(r.data));
+    api.get("/bank-accounts").then((r) => setBanks(r.data)).catch(() => {});
+  }, []);
 
   const doPrint = (p) => {
     const supplier = suppliers.find((s) => s.id === p.supplier_id);
-    printPurchase({ purchase: p, supplier, username: user?.name || user?.username });
+    printPurchase({ purchase: p, supplier, username: user?.name || user?.username, banks });
   };
 
   const removePurchase = async (p) => {
