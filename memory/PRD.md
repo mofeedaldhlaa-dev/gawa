@@ -8,47 +8,49 @@ Arabic (RTL) full-stack ERP for شبكة جواد نت اللاسلكية.
 - `/mof30` → ONLY entry for Admin/Users login.
 - `/login`, `/mof`, unknown → redirect to `/`.
 
-## Delivered (2026-02)
+## Cumulative Incentive System (2026-02, iter 12)
+- Pending earnings are **computed dynamically** on read from the sum of all active sales quantities per (customer, category). No per-sale insert.
+- Rules per category, per account_type (customer / pos), independent.
+- Cumulative: multiple invoices, multiple days, cash + credit + electronic — all counted together.
+- Remainder carries forward across cycles: bought=23 with buy=10/reward=1 → earned 2, remaining 3 for next.
+- Categories tracked independently — no cross-category mixing.
+- `exclude_special_price` toggle skips accounts with `special_prices_enabled=true`.
+- Sale edit/delete automatically recomputes because logic reads from live sales.
+- Redemption creates a permanent `incentive_earnings` history record (`redeemed_card` or `redeemed_credit`) — never re-runnable.
+- History preserved forever even after new redemption cycles start.
 
-### Statement cleanup
-- Editing / deleting sale/purchase/receipt now removes the ORIGINAL ledger entry (via `_remove_ledger_by_op`) so no "تعديل / حذف / عكس" noise in customer/supplier statements.
+## Incentive UI
+- PublicOrder data card has a **🎁 حوافز** button with red badge if pending > 0.
+- Modal shows per-category rows: `bought / redeemed / pending`, rule text, Arabic status string, and two buttons on pending rows: "استلام كرت الحافز" / "تقييد المبلغ في حسابي". History list at bottom.
+- Alert banner at top when pending exist.
 
-### Bank Accounts
-- Collection `bank_accounts` + full CRUD + admin page `/bank-accounts`.
-- Per-bank visibility flags: `invoices` / `receipts` / `payment_requests` / `over_limit`.
-- Auto-appended to printed invoices and receipts in a gold-accent block.
+## Incentive Report
+- `GET /api/reports/incentives?start&end&customer_id&category_id&status_filter` returns `{items, count, total_qty, total_value}`.
+- Redemption history only (redeemed_card / redeemed_credit).
+- Yemen +03:00 boundaries.
 
-### Special Prices (per customer / per POS)
-- Customer form has "تفعيل سعر خاص" toggle + list editor (category + price).
-- Backend fields `special_prices_enabled`, `special_prices: [{category_id, price}]`.
-- `create_sale` price resolution precedence: special_prices → cat.sale_price_pos/customer → cat.sale_price.
-- Independent per account — customer prices never affect POS and vice-versa.
+## Bank Accounts in Public
+- `GET /api/public/card-order/banks?show_in=over_limit` — public (no auth).
+- PublicOrder over-limit error banner auto-shows those banks with bank_name / holder / account / details.
+- `POST /api/payment-requests` auto-appends "بيانات السداد" block for every active bank with `show_in=payment_requests`.
 
-### Incentives System
-- Settings section "الحوافز" with 3 toggles: customer_enabled, pos_enabled, exclude_special_price.
-- Collection `incentive_rules` per account_type (customer / pos), CRUD, per-rule active flag.
-- Auto-earning on sale via `_apply_incentive_on_sale` (non-fatal, per-category qty ÷ buy × reward).
-- Pending earnings stored in `incentive_earnings`.
-- Deleting a sale drops its pending earnings (redeemed ones are kept forever).
-- Public endpoints `/public/card-order/incentives` (list) + `/public/card-order/incentives/{id}/redeem?mode=card|credit`.
-- PublicOrder screen shows "🎁 مبروك! لديك حوافز مستحقة" card with two buttons: **استلام كرت الحافز** and **تقييد المبلغ في حسابي**.
-- Duplicate-redeem prevented by status transitions (`pending → redeemed_card | redeemed_credit`).
+## Delivered Earlier
+- Statement cleanup (no تعديل/حذف noise in ledger).
+- Bank Accounts CRUD + admin page + invoice/receipt print integration.
+- Special Prices per customer/POS.
+- Login redirects, PWA (manifest + service worker + icons).
 
 ## Auth
-- Admins strictly exempt from device-binding.
-- Login → /dashboard. Logout & 401 → /mof30.
+- Admins exempt from device-binding. Login → /dashboard. Logout & 401 → /mof30.
 - Customers device-bound (5 failed = block).
-
-## PWA
-- /manifest.json + /service-worker.js + icons — installable on Android.
 
 ## Credentials
 - MOFEED / EeFSWtdsFRBmb3p (18 permissions)
 - admin / admin123, MOF / admin123
-- Per-deploy admin auto-created (see backend.err.log `[DEPLOY-SEED]`).
+- Per-deploy admin auto-created.
 
 ## Backlog
-- P1: Refactor server.py (>3800 lines) into modular routers.
+- P1: Refactor server.py (>3900 lines) into modular routers.
 - P2: Biometric (WebAuthn/Passkeys) login.
-- P2: Payment-request notifications & over-limit alerts to consume `bank_accounts` filter for those `show_in` values.
+- P2: Incentive report UI page (backend endpoint is ready).
 - P2: MongoDB Atlas migration.

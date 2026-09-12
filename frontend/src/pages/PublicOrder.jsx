@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { fmt, fmtDate, openWhatsApp, openSMS, phoneFingerprint } from "@/lib/utils";
 import { printStatement } from "@/lib/print";
 import { printPublicOrder } from "@/lib/print";
-import { Wifi, CheckCircle, Copy, KeyRound, Phone, Ban, AlertCircle, Printer, History, Search, ContactRound, Send, MessageSquare, FileText } from "lucide-react";
+import { Wifi, CheckCircle, Copy, KeyRound, Phone, Ban, AlertCircle, Printer, History, Search, ContactRound, Send, MessageSquare, FileText, Gift, Landmark } from "lucide-react";
 
 const ADMIN_WHATSAPP = "784225716";
 
@@ -33,6 +33,7 @@ export default function PublicOrder() {
   const [showForgot, setShowForgot] = useState(false);
   const [showRegister, setShowRegister] = useState(false);
   const [showChangePwd, setShowChangePwd] = useState(false);
+  const [orderError, setOrderError] = useState("");
   const [blocked, setBlocked] = useState(false);
   const [selectedCat, setSelectedCat] = useState(null);
   const [sendToOther, setSendToOther] = useState(false);
@@ -85,28 +86,34 @@ export default function PublicOrder() {
   const [showStmtDialog, setShowStmtDialog] = useState(false);
   const [stmtStart, setStmtStart] = useState("");
   const [stmtEnd, setStmtEnd] = useState("");
-  const [incentives, setIncentives] = useState([]);
+  const [incentives, setIncentives] = useState({ enabled: false, categories: [], history: [] });
+  const [showIncentives, setShowIncentives] = useState(false);
+  const [overLimitBanks, setOverLimitBanks] = useState([]);
 
   const loadIncentives = async (ph, pw) => {
     try {
       const r = await api.post("/public/card-order/incentives", { phone: ph || phone, password: pw || password });
-      setIncentives(r.data?.items || []);
-    } catch { setIncentives([]); }
+      setIncentives(r.data || { enabled: false, categories: [], history: [] });
+    } catch { setIncentives({ enabled: false, categories: [], history: [] }); }
+  };
+  const loadOverLimitBanks = async () => {
+    try { const r = await api.get("/public/card-order/banks?show_in=over_limit"); setOverLimitBanks(r.data || []); }
+    catch { setOverLimitBanks([]); }
   };
 
-  const redeemIncentive = async (inc, mode) => {
+  const redeemIncentive = async (row, mode) => {
+    if (!row?.category_id || row?.pending_qty <= 0) return;
+    if (!window.confirm(mode === "credit"
+      ? `تقييد قيمة الحافز (${row.pending_qty} × ${fmt(row.unit_value)}) في حسابك؟`
+      : `استلام ${row.pending_qty} كرت حافز من فئة ${row.category_name}؟`)) return;
     try {
-      const r = await api.post(`/public/card-order/incentives/${inc.id}/redeem`, { phone, password, mode });
-      if (mode === "credit") {
-        toast.success(`تم تقييد ${fmt(r.data.value)} في حسابك بنجاح 🎁`);
-      } else {
+      const r = await api.post(`/public/card-order/incentives/redeem`, { phone, password, mode, category_id: row.category_id });
+      if (mode === "credit") toast.success(`تم تقييد ${fmt(r.data.value)} في حسابك بنجاح 🎁`);
+      else {
         toast.success(`تم تسليم ${r.data.qty} كرت حافز 🎁`);
-        if (r.data.cards?.length) {
-          setResult({ cards: r.data.cards, recipient_phone: null, balance_after: customer?.balance || 0 });
-        }
+        if (r.data.cards?.length) setResult({ cards: r.data.cards, recipient_phone: null, balance_after: customer?.balance || 0 });
       }
-      loadIncentives();
-      // Refresh customer balance
+      await loadIncentives();
       try {
         const rc = await api.post("/public/card-order/login", { phone, password, device_id: phoneFingerprint() });
         setCustomer(rc.data);
@@ -174,6 +181,7 @@ export default function PublicOrder() {
       else clearSavedCredentials();
       toast.success(`مرحباً ${r.data.name}`);
       loadIncentives(phone, password);
+      loadOverLimitBanks();
     } catch (err) {
       const status = err.response?.status;
       const msg = errText(err);
@@ -254,21 +262,27 @@ export default function PublicOrder() {
       setRecipientPhone(digits);
     }
     setLoading(true);
+    setOrderError("");
     try {
       const payload = { phone, password, category_id, quantity: Number(quantity) };
       if (sendToOther && recipientPhone) payload.recipient_phone = recipientPhone.replace(/[^0-9+]/g, "");
       const r = await api.post("/public/card-order/request", payload);
-      // Attach recipient_name locally for display (backend doesn't need it)
       const dataWithName = { ...r.data, recipient_name: sendToOther ? recipientName : "" };
       setResult(dataWithName);
       const cat = cats.find((c) => c.id === category_id);
       setSelectedCat(cat);
       toast.success(payload.recipient_phone ? `تم تنفيذ الطلب — تحويل إلى ${recipientName || payload.recipient_phone}` : "تم تنفيذ طلبك بنجاح");
-      // Auto-open the SMS app when a recipient was chosen — a click is still needed to send.
       if (payload.recipient_phone && r.data?.cards?.length) {
         setTimeout(() => sendCardSms(payload.recipient_phone, r.data.cards, cat?.name), 600);
       }
-    } catch (e) { toast.error(errText(e)); }
+    } catch (e) {
+      const msg = errText(e);
+      if ((msg || "").includes("سقف") || (msg || "").includes("تجاوز")) {
+        setOrderError(msg);
+      } else {
+        toast.error(msg);
+      }
+    }
     setLoading(false);
   };
 
@@ -403,28 +417,12 @@ export default function PublicOrder() {
               <div className="text-xl font-black text-[#221340] mt-1" data-testid="po-welcome-name">{customer.name}</div>
             </div>
 
-            {incentives.length > 0 && (
-              <Card className="p-3 bg-gradient-to-l from-amber-50 to-yellow-50 border-2 border-amber-400" data-testid="po-incentives">
+            {incentives.enabled && incentives.categories.some((c) => c.pending_qty > 0) && (
+              <Card className="p-3 bg-gradient-to-l from-amber-50 to-yellow-50 border-2 border-amber-400" data-testid="po-incentives-alert">
                 <div className="text-center mb-2">
                   <div className="text-2xl">🎁</div>
                   <div className="font-black text-amber-800">مبروك! لديك حوافز مستحقة</div>
-                </div>
-                <div className="space-y-2">
-                  {incentives.map((inc) => (
-                    <div key={inc.id} className="bg-white rounded-lg p-2 border border-amber-200" data-testid={`po-inc-${inc.id}`}>
-                      <div className="flex justify-between items-center text-sm">
-                        <div>
-                          <div className="font-bold">{inc.category_name}</div>
-                          <div className="text-xs text-slate-500">من الفاتورة {inc.source_sale_number || "—"}</div>
-                        </div>
-                        <div className="text-lg font-black text-amber-700">{inc.qty} كرت</div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-1 mt-2">
-                        <Button size="sm" onClick={() => redeemIncentive(inc, "card")} className="bg-[#D4AF37] text-[#1A0F33] hover:bg-[#C5A028] text-xs" data-testid={`po-inc-card-${inc.id}`}>استلام كرت الحافز</Button>
-                        <Button size="sm" onClick={() => redeemIncentive(inc, "credit")} variant="outline" className="border-[#452480] text-[#452480] text-xs" data-testid={`po-inc-credit-${inc.id}`}>تقييد المبلغ في حسابي</Button>
-                      </div>
-                    </div>
-                  ))}
+                  <button onClick={() => setShowIncentives(true)} className="text-xs text-[#452480] hover:underline mt-1" data-testid="po-inc-open-alert">عرض التفاصيل</button>
                 </div>
               </Card>
             )}
@@ -441,20 +439,56 @@ export default function PublicOrder() {
                 <div><div className="text-slate-500">المديونية</div><div className="num font-bold">{fmt(customer.balance)}</div></div>
                 <div><div className="text-slate-500">المتاح</div><div className="num font-bold text-green-600">{fmt(customer.available)}</div></div>
               </div>
-              <div className="mt-2 pt-2 border-t border-slate-200">
+              <div className="mt-2 pt-2 border-t border-slate-200 grid grid-cols-2 gap-2">
                 <Button
                   type="button"
                   onClick={openStmtDialog}
                   disabled={printingStmt}
                   variant="outline"
                   size="sm"
-                  className="w-full border-[#452480] text-[#452480] hover:bg-[#452480]/10"
+                  className="border-[#452480] text-[#452480] hover:bg-[#452480]/10"
                   data-testid="po-print-statement"
                 >
-                  <FileText size={14} className="ml-1"/> طباعة كشف الحساب
+                  <FileText size={14} className="ml-1"/> كشف الحساب
                 </Button>
+                {incentives.enabled && (
+                  <Button
+                    type="button"
+                    onClick={() => setShowIncentives(true)}
+                    variant="outline"
+                    size="sm"
+                    className="border-amber-500 text-amber-700 hover:bg-amber-50 relative"
+                    data-testid="po-open-incentives"
+                  >
+                    <Gift size={14} className="ml-1"/> حوافز
+                    {incentives.categories.some((c) => c.pending_qty > 0) && <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[9px] rounded-full h-4 w-4 flex items-center justify-center font-bold">!</span>}
+                  </Button>
+                )}
               </div>
             </Card>
+            {orderError && (
+              <Card className="p-3 border-2 border-red-400 bg-red-50" data-testid="po-order-error">
+                <div className="text-red-800 font-bold text-sm text-center">{orderError}</div>
+                {overLimitBanks.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-red-300">
+                    <div className="text-[11px] text-slate-600 mb-1 font-bold">للسداد يمكنك التحويل إلى:</div>
+                    <div className="space-y-2" data-testid="po-over-limit-banks">
+                      {overLimitBanks.map((b) => (
+                        <div key={b.id} className="bg-white rounded-lg border border-amber-300 border-r-4 border-r-[#D4AF37] p-2 text-xs">
+                          <div className="font-bold text-[#221340] flex items-center gap-1"><Landmark size={12}/> {b.bank_name}</div>
+                          <div className="grid grid-cols-2 gap-1 mt-1">
+                            <div><span className="text-slate-500">اسم الحساب: </span><span className="font-bold">{b.holder_name}</span></div>
+                            <div><span className="text-slate-500">رقم الحساب: </span><span className="font-mono font-bold select-all">{b.account_number}</span></div>
+                          </div>
+                          {b.details && <div className="text-slate-500 mt-1 whitespace-pre-line">{b.details}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div className="mt-2 text-center"><button onClick={() => setOrderError("")} className="text-[11px] text-slate-500 underline">إغلاق</button></div>
+              </Card>
+            )}
             <div><Label>الفئة</Label>
               <Select value={category_id} onValueChange={setCategoryId}>
                 <SelectTrigger data-testid="po-cat"><SelectValue placeholder="اختر"/></SelectTrigger>
