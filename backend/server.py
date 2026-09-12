@@ -334,7 +334,7 @@ class CustomerIn(BaseModel):
     name: str
     phone: Optional[str] = ""
     password: Optional[str] = None
-    credit_limit: float = 0
+    credit_limit: float = 500
     opening_balance: float = 0
     address: Optional[str] = ""
     notes: Optional[str] = ""
@@ -343,6 +343,7 @@ class CustomerIn(BaseModel):
     special_prices_enabled: Optional[bool] = False
     special_prices: Optional[List[SpecialPrice]] = []
     incentives_visible: Optional[bool] = True
+    opening_balance: float = 0
 
 class SupplierIn(BaseModel):
     name: str
@@ -1187,6 +1188,148 @@ async def _remove_ledger_by_op(party_type: str, party_id: str, op_number: str):
     return delta
 
 
+# ================= WALLET TRANSFERS (public) =================
+class TransferLookupIn(BaseModel):
+    phone: str
+    password: str
+    recipient_phone: str
+    amount: float
+
+class TransferConfirmIn(TransferLookupIn):
+    idempotency_key: str
+
+def _transfer_commission(sender: dict, amount: float) -> float:
+    """POS accounts pay 10% commission on top of the transfer amount (deducted from their side).
+    Regular customers pay 0%."""
+    if (sender or {}).get("customer_type") == "pos":
+        return round(float(amount) * 0.10, 2)
+    return 0.0
+
+@api.post("/public/card-order/transfer/lookup")
+async def public_transfer_lookup(data: TransferLookupIn):
+    sender = await _verify_public_customer(data.phone, data.password)
+    if data.amount <= 0: raise HTTPException(status_code=400, detail="المبلغ غير صحيح")
+    recipient = await db.customers.find_one({"phone": data.recipient_phone})
+    if not recipient: raise HTTPException(status_code=404, detail="الحساب غير موجود")
+    if recipient.get("id") == sender.get("id"): raise HTTPException(status_code=400, detail="لا يمكن التحويل لنفس الحساب")
+    commission = _transfer_commission(sender, data.amount)
+    total_debit = data.amount + commission if commission > 0 else data.amount
+    # For POS-sender flow: deducted from sender = amount - commission (per requirement: 1000 send, 100 comm, deduct 900)
+    if (sender or {}).get("customer_type") == "pos":
+        total_debit = data.amount - commission
+    # Credit-limit check
+    limit = float(sender.get("credit_limit") or 0)
+    new_balance = float(sender.get("balance") or 0) + total_debit
+    if limit > 0 and new_balance > limit:
+        raise HTTPException(status_code=400, detail=f"تتجاوز عملية التحويل سقف الحساب ({limit:,.0f})")
+    return {
+        "sender_id": sender["id"], "sender_type": sender.get("customer_type", "customer"),
+        "recipient_id": recipient["id"], "recipient_name": recipient.get("name",""),
+        "recipient_phone": recipient.get("phone",""), "recipient_type": recipient.get("customer_type","customer"),
+        "amount": float(data.amount), "commission": commission,
+        "sender_debit": total_debit, "recipient_credit": float(data.amount),
+    }
+
+@api.post("/public/card-order/transfer/confirm")
+async def public_transfer_confirm(data: TransferConfirmIn):
+    if not data.idempotency_key: raise HTTPException(status_code=400, detail="مفتاح الحماية مطلوب")
+    existing = await db.transfers.find_one({"idempotency_key": data.idempotency_key})
+    if existing: return clean_doc(existing)
+    sender = await _verify_public_customer(data.phone, data.password)
+    recipient = await db.customers.find_one({"phone": data.recipient_phone})
+    if not recipient: raise HTTPException(status_code=404, detail="الحساب غير موجود")
+    if recipient.get("id") == sender.get("id"): raise HTTPException(status_code=400, detail="لا يمكن التحويل لنفس الحساب")
+    if data.amount <= 0: raise HTTPException(status_code=400, detail="المبلغ غير صحيح")
+    commission = _transfer_commission(sender, data.amount)
+    sender_debit = (data.amount - commission) if sender.get("customer_type") == "pos" else (data.amount + commission)
+    # Credit-limit final check
+    limit = float(sender.get("credit_limit") or 0)
+    if limit > 0 and float(sender.get("balance") or 0) + sender_debit > limit:
+        raise HTTPException(status_code=400, detail="تتجاوز العملية سقف الحساب")
+    number = await next_gwd_number()
+    doc = {
+        "id": str(uuid.uuid4()), "number": number, "idempotency_key": data.idempotency_key,
+        "sender_id": sender["id"], "sender_name": sender.get("name",""), "sender_phone": sender.get("phone",""),
+        "sender_type": sender.get("customer_type", "customer"),
+        "recipient_id": recipient["id"], "recipient_name": recipient.get("name",""),
+        "recipient_phone": recipient.get("phone",""),
+        "amount": float(data.amount), "commission": commission, "sender_debit": sender_debit,
+        "status": "done", "created_at": now_iso(),
+    }
+    # 1) debit sender
+    await _adjust_party_balance("customer", sender["id"], sender_debit, number, f"تحويل رصيد إلى {recipient.get('name','')} ({recipient.get('phone','')})")
+    # 2) credit recipient (full amount)
+    await _adjust_party_balance("customer", recipient["id"], -float(data.amount), number, f"استلام تحويل من {sender.get('name','')} ({sender.get('phone','')})")
+    await db.transfers.insert_one(doc)
+    # 3) notify recipient
+    await db.notifications.insert_one({
+        "id": str(uuid.uuid4()), "title": "استلام تحويل رصيد",
+        "message": f"تم استلام {float(data.amount):,.0f} من {sender.get('name','')} — عملية {number}.",
+        "type": "success", "read": False, "created_at": now_iso(),
+        "customer_id": recipient["id"], "kind": "transfer",
+    })
+    return clean_doc(doc)
+
+
+# ================= NOTIFICATIONS (admin broadcast + customer read) =================
+class BroadcastIn(BaseModel):
+    title: str
+    message: str
+    recipients: Optional[List[str]] = None  # customer ids; None or [] = all customers
+
+@api.post("/notifications/broadcast")
+async def broadcast_notification(data: BroadcastIn, user=Depends(require_perm("settings"))):
+    if not data.title or not data.message: raise HTTPException(status_code=400, detail="العنوان والنص إلزاميان")
+    if data.recipients:
+        ids = data.recipients
+    else:
+        customers = await db.customers.find({"status": {"$ne": "disabled"}}, {"id": 1}).to_list(10000)
+        ids = [c["id"] for c in customers]
+    now = now_iso()
+    group_id = str(uuid.uuid4())
+    docs = [{
+        "id": str(uuid.uuid4()), "group_id": group_id,
+        "title": data.title, "message": data.message,
+        "type": "info", "read": False, "created_at": now,
+        "customer_id": cid, "kind": "admin_broadcast",
+        "sender_username": user.get("username"),
+    } for cid in ids]
+    if docs: await db.notifications.insert_many(docs)
+    return {"ok": True, "count": len(docs), "group_id": group_id}
+
+@api.get("/notifications/broadcast-log")
+async def broadcast_log(user=Depends(require_perm("settings"))):
+    rows = await db.notifications.aggregate([
+        {"$match": {"kind": "admin_broadcast"}},
+        {"$sort": {"created_at": -1}},
+        {"$group": {"_id": "$group_id", "title": {"$first": "$title"}, "message": {"$first": "$message"},
+                    "created_at": {"$first": "$created_at"}, "sender_username": {"$first": "$sender_username"},
+                    "count": {"$sum": 1}, "read_count": {"$sum": {"$cond": ["$read", 1, 0]}}}},
+        {"$sort": {"created_at": -1}}, {"$limit": 200}
+    ]).to_list(200)
+    return rows
+
+class PublicNotifIn(BaseModel):
+    phone: str
+    password: str
+
+@api.post("/public/card-order/notifications")
+async def public_notifications(data: PublicNotifIn):
+    c = await _verify_public_customer(data.phone, data.password)
+    items = await db.notifications.find({"customer_id": c["id"]}).sort("created_at", -1).limit(200).to_list(200)
+    unread = await db.notifications.count_documents({"customer_id": c["id"], "read": False})
+    return {"items": [clean_doc(x) for x in items], "unread": unread}
+
+class PublicNotifReadIn(PublicNotifIn):
+    notif_id: str
+
+@api.post("/public/card-order/notifications/mark-read")
+async def public_notif_mark_read(data: PublicNotifReadIn):
+    c = await _verify_public_customer(data.phone, data.password)
+    await db.notifications.update_one({"id": data.notif_id, "customer_id": c["id"]}, {"$set": {"read": True, "read_at": now_iso()}})
+    return {"ok": True}
+
+
 # ================= INCENTIVES =================
 async def _get_incentive_settings():
     doc = await db.settings.find_one({"_key": "incentives"}) or {}
@@ -1228,21 +1371,27 @@ async def _customer_incentive_summary(customer: dict) -> Dict[str, Any]:
         return {"enabled": bool(enabled), "categories": [], "history": []}
     bought_map = await _sum_bought_by_category(customer["id"])
     result = []
+    # Cumulative buys minus baseline (baseline set on each incentive card-redemption)
+    baseline_map: Dict[str, int] = {}
+    for b in (customer.get("incentive_baseline") or []):
+        cid_key = b.get("category_id"); qval = int(b.get("bought_at_redeem") or 0)
+        if cid_key: baseline_map[cid_key] = qval
     for r in rules:
         cid = r.get("category_id"); buy = int(r.get("buy_qty") or 0); reward = int(r.get("reward_qty") or 0)
         if not cid or buy <= 0 or reward <= 0: continue
         cat = await db.card_categories.find_one({"id": cid}) or {}
-        bought = int(bought_map.get(cid, 0))
-        # Sum ALL earnings historically ever earned (via cumulative math): floor(bought / buy) * reward
+        raw_bought = int(bought_map.get(cid, 0))
+        baseline = int(baseline_map.get(cid, 0))
+        bought = max(0, raw_bought - baseline)
+        # earnings from THIS cycle only
         total_earned_ever = (bought // buy) * reward
-        # Sum already redeemed for this category
         red_docs = await db.incentive_earnings.find({
             "customer_id": customer["id"], "category_id": cid,
             "status": {"$in": ["redeemed_card", "redeemed_credit"]},
+            "cycle_start_bought": {"$gte": baseline},
         }).to_list(1000)
         redeemed_qty = sum(int(x.get("qty") or 0) for x in red_docs)
         pending_qty = max(0, total_earned_ever - redeemed_qty)
-        # remaining until next reward (cumulative, doesn't reset)
         used_towards_earned = (total_earned_ever // reward) * buy if reward else 0
         remaining_for_next = max(0, buy - (bought - used_towards_earned))
         if pending_qty > 0:
@@ -1315,6 +1464,7 @@ async def _redeem_incentive(customer: dict, category_id: str, mode: str, qty_req
         "redeemed_at": now,
         "redeemed_by": (acting_user or {}).get("username", "public"),
     }
+    base_rec["cycle_start_bought"] = 0  # not used for credit
     if mode == "credit":
         value = float(row["unit_value"] or 0) * qty
         await _adjust_party_balance("customer", customer["id"], -value, f"INC-{rec_id[:8]}", f"حافز {row['category_name']} × {qty}")
@@ -1339,6 +1489,19 @@ async def _redeem_incentive(customer: dict, category_id: str, mode: str, qty_req
         await db.stock.update_one({"category_id": category_id}, {"$inc": {"sold": take_qty}})
     base_rec.update({"status": "redeemed_card", "cards": cards_delivered})
     await db.incentive_earnings.insert_one(base_rec)
+    # Reset baseline for this category so the display counter starts from 0
+    raw = await _sum_bought_by_category(customer["id"])
+    new_baseline = int(raw.get(category_id, 0))
+    existing = [b for b in (customer.get("incentive_baseline") or []) if b.get("category_id") != category_id]
+    existing.append({"category_id": category_id, "bought_at_redeem": new_baseline, "reset_at": now})
+    await db.customers.update_one({"id": customer["id"]}, {"$set": {"incentive_baseline": existing}})
+    # Create a notification the customer can see
+    await db.notifications.insert_one({
+        "id": str(uuid.uuid4()), "title": "استلام حافز",
+        "message": f"تم استلام {qty} كرت من فئة {row['category_name']} كحافز.",
+        "type": "success", "read": False, "created_at": now,
+        "customer_id": customer["id"], "kind": "incentive",
+    })
     return {"ok": True, "mode": "card", "cards": cards_delivered, "qty": qty}
 
 

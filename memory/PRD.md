@@ -1,48 +1,49 @@
 # Jawad Net Wireless ERP - PRD
 
 ## Product
-Arabic (RTL) full-stack ERP for شبكة جواد نت اللاسلكية.
+Arabic (RTL) full-stack ERP for شبكة جواد نت اللاسلكية. Public window = GAWAD NET.
 
-## Routing
-- `/` → PublicOrder. `/mof30` → Admin login. Others redirect to `/`.
+## Routing & PWA
+- `/` → GAWAD NET (PublicOrder). `manifest.json` name=GAWAD NET, start_url=`/`.
+- `/mof30` → Admin login. `manifest-mof30.json` start_url=`/mof30` (separate installable app).
 
-## Latest Delivery (2026-02, iter 14) — all 8/8 backend tests PASS
-### 1) Simplified Incentives Dialog in PublicOrder
-- Removed explanations. Now shows per-category: **الكروت المشتراة** + **المتبقي للحافز**.
-- Single redeem button: **"استلم كروت"** — "تقييد إلى حساب" removed.
-- Uses `remaining_for_next` from summary.
+## Latest Delivery (2026-02, iter 15)
+### GAWAD NET
+- Renamed pill from "طلب كرت" → **"GAWAD NET"**.
+- Removed incentives icon from data card. Access is now via 🔔 Bell → tap notification.
+- Bell icon in header shows unread count from `/public/card-order/notifications`.
+- Two operation tabs: **شراء كرت** / **تحويل لمشترك**.
 
-### 2) Statement Button in PublicOrder
-- Verified via testing_agent: `/public/card-order/statement` returns `{customer, entries}` with correct UTC+03:00 boundaries for daily/monthly/yearly/custom.
-- Button `openStmtDialog` opens dialog; picker `StatementPeriodPicker` handles all modes.
+### تحويل لمشترك (public wallet transfer)
+- Endpoints: `/public/card-order/transfer/lookup` → returns preview with commission. `/public/card-order/transfer/confirm` with `idempotency_key` → executes.
+- **POS commission rule (final):** if sender is POS, commission = 10% of amount, recipient gets FULL amount, sender is debited `amount - commission` (as per user spec). Regular customers: no commission.
+- Guards: recipient existence check, self-transfer blocked, credit-limit enforcement, idempotency dedup.
 
-### 3) Per-Customer Incentives Visibility Toggle
-- New field `customers.incentives_visible` (default `true`) — backward compatible.
-- `_customer_incentive_summary` returns `enabled=false` when:
-  - `special_prices_enabled=true` AND settings.exclude_special_price=true (existing), OR
-  - `incentives_visible=false` (NEW).
-- Admin form has a select: **"الحوافز: إظهار / إخفاء"** (`data-testid="cust-incentives-visible"`).
+### Incentives — cycle reset
+- Field `customers.incentive_baseline: [{category_id, bought_at_redeem, reset_at}]`.
+- `_customer_incentive_summary` subtracts baseline from cumulative bought → displays 0 after redeem.
+- Only card redemption resets baseline (and after successful record insert).
+- Redemption creates an "incentive" notification for the customer.
 
-### 4) Post-Save Actions Dialog in AccountDetail
-- After saving a receipt/expense, opens a small dialog with:
-  - **طباعة** button (`last-op-print`) — uses `printReceipt` with bank blocks.
-  - **إرسال واتساب** button (`last-op-wa`) — uses customer phone. If phone missing → toast error.
-- `saveVoucher` now returns the created object and passes it to the dialog.
+### Simplified incentive dialog
+- Shows only: bought, remaining_for_next. Single button: **استلم كروت**. Credit option removed.
 
-### 5) Payment Request Bank Format
-- Message auto-appends debt total + requested amount + bank blocks WITHOUT "البنك:" prefix.
-- Verified: `إجمالي المديونية: 1,500` + `المبلغ المطلوب سداده: 700` + bank fields.
+### Notifications
+- New collection fields: `customer_id`, `kind` (transfer / incentive / admin_broadcast).
+- Public: `POST /public/card-order/notifications` (list + unread) and `.../mark-read`.
+- Admin broadcast: `POST /notifications/broadcast` (title, message, recipients or all).
+- Log: `GET /notifications/broadcast-log` (grouped by group_id, count + read_count).
 
-## Backlog
-- P1: Refactor server.py (~4000 lines) into modular routers.
-- P2: Biometric (WebAuthn/Passkeys) login.
-- P2: Aggregation for `/reports/incentives?kind=pending` (currently O(customers × rules)).
-- P2: Skip blank bank fields in `/payment-requests` message assembly.
-- P3: Uniform 401/404 for `/public/card-order/statement` to prevent phone enumeration.
+### Customer defaults
+- `CustomerIn.credit_limit` default → **500** (only for new records; existing untouched).
+
+## Auth
+- Admins exempt from device-binding. Customers device-bound (5 failed = block).
 
 ## Credentials
 - MOFEED / EeFSWtdsFRBmb3p (18 permissions)
 
-## Test Reports
-- /app/backend/tests/test_iteration14_incentives_statement.py — 8/8 PASS
-- /app/test_reports/iteration_14.json
+## Backlog
+- P1: Refactor server.py (~4200 lines).
+- P2: WebAuthn/Passkey login.
+- P2: Admin UI to send broadcasts (endpoint ready, page TBD).

@@ -1,0 +1,17 @@
+{
+  "name": "GAWAD ADMIN",
+  "short_name": "MOF30",
+  "description": "لوحة إدارة شبكة جواد نت",
+  "start_url": "/mof30",
+  "scope": "/mof30",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#221340",
+  "theme_color": "#221340",
+  "dir": "rtl",
+  "lang": "ar",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

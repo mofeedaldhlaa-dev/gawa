@@ -1,8 +1,8 @@
 {
-  "name": "شبكة جواد نت اللاسلكية",
-  "short_name": "جواد نت",
-  "description": "نظام إدارة شبكة جواد نت - محاسبة ومبيعات ومخزون",
-  "start_url": "/mof30",
+  "name": "GAWAD NET",
+  "short_name": "GAWAD NET",
+  "description": "طلب كروت الإنترنت من شبكة جواد نت",
+  "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",

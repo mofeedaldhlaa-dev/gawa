@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { fmt, fmtDate, openWhatsApp, openSMS, phoneFingerprint } from "@/lib/utils";
 import { printStatement } from "@/lib/print";
 import { printPublicOrder } from "@/lib/print";
-import { Wifi, CheckCircle, Copy, KeyRound, Phone, Ban, AlertCircle, Printer, History, Search, ContactRound, Send, MessageSquare, FileText, Gift, Landmark } from "lucide-react";
+import { Wifi, CheckCircle, Copy, KeyRound, Phone, Ban, AlertCircle, Printer, History, Search, ContactRound, Send, MessageSquare, FileText, Gift, Landmark, Bell, Users, ArrowLeftRight } from "lucide-react";
 
 const ADMIN_WHATSAPP = "784225716";
 
@@ -89,6 +89,53 @@ export default function PublicOrder() {
   const [incentives, setIncentives] = useState({ enabled: false, categories: [], history: [] });
   const [showIncentives, setShowIncentives] = useState(false);
   const [overLimitBanks, setOverLimitBanks] = useState([]);
+  const [notifs, setNotifs] = useState([]);
+  const [notifUnread, setNotifUnread] = useState(0);
+  const [showNotifs, setShowNotifs] = useState(false);
+  const [mode, setMode] = useState("card"); // "card" | "transfer"
+  const [tRecipient, setTRecipient] = useState("");
+  const [tAmount, setTAmount] = useState("");
+  const [tConfirm, setTConfirm] = useState(null); // preview after lookup
+
+  const loadNotifs = async (ph, pw) => {
+    try {
+      const r = await api.post("/public/card-order/notifications", { phone: ph || phone, password: pw || password });
+      setNotifs(r.data?.items || []);
+      setNotifUnread(r.data?.unread || 0);
+    } catch { setNotifs([]); setNotifUnread(0); }
+  };
+  const markNotifRead = async (id) => {
+    try {
+      await api.post("/public/card-order/notifications/mark-read", { phone, password, notif_id: id });
+      setNotifs((prev) => prev.map((n) => n.id === id ? { ...n, read: true } : n));
+      setNotifUnread((u) => Math.max(0, u - 1));
+    } catch {}
+  };
+  const openNotifAction = (n) => {
+    markNotifRead(n.id);
+    if (n.kind === "incentive") { setShowNotifs(false); setShowIncentives(true); }
+  };
+
+  const doTransferLookup = async () => {
+    if (!tRecipient || !tAmount || Number(tAmount) <= 0) { toast.error("أدخل رقم المشترك والمبلغ"); return; }
+    try {
+      const r = await api.post("/public/card-order/transfer/lookup", { phone, password, recipient_phone: tRecipient, amount: Number(tAmount) });
+      setTConfirm({ ...r.data, key: Math.random().toString(36).slice(2) + Date.now() });
+    } catch (e) { toast.error(errText(e)); setTConfirm(null); }
+  };
+  const [tSubmitting, setTSubmitting] = useState(false);
+  const doTransferConfirm = async () => {
+    if (!tConfirm || tSubmitting) return;
+    setTSubmitting(true);
+    try {
+      const r = await api.post("/public/card-order/transfer/confirm", { phone, password, recipient_phone: tRecipient, amount: Number(tAmount), idempotency_key: tConfirm.key });
+      toast.success(`تم التحويل بنجاح — رقم العملية ${r.data.number}`);
+      setTConfirm(null); setTRecipient(""); setTAmount("");
+      try { const rc = await api.post("/public/card-order/login", { phone, password, device_id: phoneFingerprint() }); setCustomer(rc.data); } catch {}
+      loadNotifs();
+    } catch (e) { toast.error(errText(e)); }
+    setTSubmitting(false);
+  };
 
   const loadIncentives = async (ph, pw) => {
     try {
@@ -182,6 +229,7 @@ export default function PublicOrder() {
       toast.success(`مرحباً ${r.data.name}`);
       loadIncentives(phone, password);
       loadOverLimitBanks();
+      loadNotifs(phone, password);
     } catch (err) {
       const status = err.response?.status;
       const msg = errText(err);
@@ -337,10 +385,10 @@ export default function PublicOrder() {
         <div className="text-center mb-6">
           <div className="text-2xl font-black text-[#221340] tracking-tight">شبكة جواد نت اللاسلكية</div>
           {!customer && (
-            <div className="mt-4 inline-block bg-gradient-to-l from-[#D4AF37] to-[#F2D06B] text-[#1A0F33] px-6 py-2 rounded-full font-bold text-lg shadow-md">طلب كرت</div>
+            <div className="mt-4 inline-block bg-gradient-to-l from-[#D4AF37] to-[#F2D06B] text-[#1A0F33] px-6 py-2 rounded-full font-bold text-lg shadow-md">GAWAD NET</div>
           )}
           {customer && (
-            <div className="mt-4 inline-block bg-gradient-to-l from-[#D4AF37] to-[#F2D06B] text-[#1A0F33] px-6 py-2 rounded-full font-bold text-lg shadow-md">طلب كرت</div>
+            <div className="mt-4 inline-block bg-gradient-to-l from-[#D4AF37] to-[#F2D06B] text-[#1A0F33] px-6 py-2 rounded-full font-bold text-lg shadow-md">GAWAD NET</div>
           )}
         </div>
 
@@ -412,18 +460,53 @@ export default function PublicOrder() {
 
         {customer && !result && (
           <div className="space-y-3">
-            <div className="text-center bg-gradient-to-l from-[#452480]/10 to-[#D4AF37]/20 border border-[#D4AF37]/40 rounded-xl p-3 shadow-sm" data-testid="po-welcome">
-              <div className="text-sm text-slate-600">مرحباً بك</div>
-              <div className="text-xl font-black text-[#221340] mt-1" data-testid="po-welcome-name">{customer.name}</div>
+            <div className="flex justify-between items-center mb-2">
+              <div className="text-center bg-gradient-to-l from-[#452480]/10 to-[#D4AF37]/20 border border-[#D4AF37]/40 rounded-xl px-3 py-2 shadow-sm flex-1 mx-2" data-testid="po-welcome">
+                <div className="text-[10px] text-slate-600">مرحباً بك</div>
+                <div className="text-sm font-black text-[#221340]" data-testid="po-welcome-name">{customer.name}</div>
+              </div>
+              <button onClick={() => setShowNotifs(true)} className="relative p-2 rounded-full hover:bg-slate-100" data-testid="po-bell" aria-label="الإشعارات">
+                <Bell size={22} className="text-[#452480]"/>
+                {notifUnread > 0 && <span className="absolute -top-0.5 -right-0.5 bg-red-600 text-white text-[10px] rounded-full h-5 min-w-5 px-1 flex items-center justify-center font-bold">{notifUnread}</span>}
+              </button>
             </div>
 
-            {incentives.enabled && incentives.categories.some((c) => c.pending_qty > 0) && (
               <Card className="p-3 bg-gradient-to-l from-amber-50 to-yellow-50 border-2 border-amber-400" data-testid="po-incentives-alert">
                 <div className="text-center mb-2">
                   <div className="text-2xl">🎁</div>
                   <div className="font-black text-amber-800">مبروك! لديك حوافز مستحقة</div>
                   <button onClick={() => setShowIncentives(true)} className="text-xs text-[#452480] hover:underline mt-1" data-testid="po-inc-open-alert">عرض التفاصيل</button>
                 </div>
+              </Card>
+            )}
+
+            <div className="grid grid-cols-2 gap-2" data-testid="po-mode-tabs">
+              <button onClick={() => setMode("card")} className={`py-2 rounded-lg border font-bold text-sm ${mode==="card"?"bg-[#452480] text-white border-[#452480]":"border-slate-300"}`} data-testid="po-mode-card"><Wifi size={14} className="inline ml-1"/> شراء كرت</button>
+              <button onClick={() => setMode("transfer")} className={`py-2 rounded-lg border font-bold text-sm ${mode==="transfer"?"bg-[#452480] text-white border-[#452480]":"border-slate-300"}`} data-testid="po-mode-transfer"><ArrowLeftRight size={14} className="inline ml-1"/> تحويل لمشترك</button>
+            </div>
+
+            {mode === "transfer" && (
+              <Card className="p-3 space-y-2 border-2 border-[#452480]/30" data-testid="po-transfer">
+                <div><Label>رقم هاتف المشترك</Label><Input inputMode="tel" value={tRecipient} onChange={(e) => { setTRecipient(e.target.value); setTConfirm(null); }} data-testid="po-t-phone"/></div>
+                <div><Label>المبلغ</Label><Input type="number" inputMode="decimal" value={tAmount} onChange={(e) => { setTAmount(e.target.value); setTConfirm(null); }} data-testid="po-t-amount"/></div>
+                {!tConfirm && <Button onClick={doTransferLookup} className="w-full bg-[#452480]" data-testid="po-t-lookup">موافقة</Button>}
+                {tConfirm && (
+                  <div className="space-y-2 bg-emerald-50 border border-emerald-300 rounded p-2 text-sm" data-testid="po-t-confirm-card">
+                    <div className="flex justify-between"><span>اسم المشترك:</span><span className="font-bold">{tConfirm.recipient_name}</span></div>
+                    <div className="flex justify-between"><span>رقم الهاتف:</span><span className="font-mono">{tConfirm.recipient_phone}</span></div>
+                    <div className="flex justify-between"><span>نوع الحساب:</span><span>{tConfirm.recipient_type === "pos" ? "نقطة بيع" : "عميل"}</span></div>
+                    <div className="flex justify-between border-t pt-1"><span>مبلغ التحويل:</span><span className="font-bold num">{fmt(tConfirm.amount)}</span></div>
+                    <div className="flex justify-between text-emerald-700 font-bold"><span>المبلغ المستلم:</span><span className="num">{fmt(tConfirm.recipient_credit)}</span></div>
+                    {tConfirm.commission > 0 && (<>
+                      <div className="flex justify-between text-amber-700"><span>عمولة نقاط البيع:</span><span className="num">{fmt(tConfirm.commission)}</span></div>
+                    </>)}
+                    <div className="flex justify-between font-bold border-t pt-1"><span>الخصم من رصيدك:</span><span className="num">{fmt(tConfirm.sender_debit)}</span></div>
+                    <div className="grid grid-cols-2 gap-1 pt-1">
+                      <Button onClick={doTransferConfirm} disabled={tSubmitting} className="bg-emerald-600 hover:bg-emerald-700" data-testid="po-t-confirm">تأكيد العملية</Button>
+                      <Button onClick={() => setTConfirm(null)} variant="outline">إلغاء</Button>
+                    </div>
+                  </div>
+                )}
               </Card>
             )}
             <Card className="p-3 bg-slate-50">
@@ -446,21 +529,10 @@ export default function PublicOrder() {
                   disabled={printingStmt}
                   variant="outline"
                   size="sm"
-                  className="border-[#452480] text-[#452480] hover:bg-[#452480]/10"
+                  className="w-full border-[#452480] text-[#452480] hover:bg-[#452480]/10"
                   data-testid="po-print-statement"
                 >
                   <FileText size={14} className="ml-1"/> كشف الحساب
-                </Button>
-                <Button
-                  type="button"
-                  onClick={() => setShowIncentives(true)}
-                  variant="outline"
-                  size="sm"
-                  className={`relative ${(incentives.enabled || incentives.history?.length) ? "border-amber-500 text-amber-700 hover:bg-amber-50" : "border-slate-300 text-slate-500 hover:bg-slate-50"}`}
-                  data-testid="po-open-incentives"
-                >
-                  <Gift size={14} className="ml-1"/> حوافز
-                  {(incentives.categories || []).some((c) => c.pending_qty > 0) && <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[9px] rounded-full h-4 w-4 flex items-center justify-center font-bold">!</span>}
                 </Button>
               </div>
             </Card>
@@ -487,6 +559,7 @@ export default function PublicOrder() {
                 <div className="mt-2 text-center"><button onClick={() => setOrderError("")} className="text-[11px] text-slate-500 underline">إغلاق</button></div>
               </Card>
             )}
+{mode === "card" && (<>
             <div><Label>الفئة</Label>
               <Select value={category_id} onValueChange={setCategoryId}>
                 <SelectTrigger data-testid="po-cat"><SelectValue placeholder="اختر"/></SelectTrigger>
@@ -556,6 +629,8 @@ export default function PublicOrder() {
             </div>
 
             <Button onClick={request} disabled={loading || !category_id || wantQty < 1 || insufficient} className="w-full bg-[#D4AF37] text-[#1A0F33] font-bold hover:bg-[#C5A028] text-lg py-6 disabled:opacity-50" data-testid="po-request">طلب</Button>
+            </>
+            )}
 
             {/* Previous orders section */}
             <div className="pt-3 border-t">
@@ -678,6 +753,24 @@ export default function PublicOrder() {
       </Dialog>
       <Dialog open={showChangePwd} onOpenChange={setShowChangePwd}>
         <ChangePasswordForm phone={phone} currentPassword={password} onClose={() => setShowChangePwd(false)} onDone={(np) => setPassword(np)}/>
+      </Dialog>
+      <Dialog open={showNotifs} onOpenChange={setShowNotifs}>
+        <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto" data-testid="po-notifs-dialog">
+          <DialogHeader><DialogTitle className="flex items-center gap-2 text-[#221340]"><Bell size={18}/> الإشعارات</DialogTitle></DialogHeader>
+          <div className="space-y-2">
+            {notifs.length === 0 && <div className="text-center p-6 text-slate-400 text-sm">لا توجد إشعارات</div>}
+            {notifs.map((n) => (
+              <button key={n.id} onClick={() => openNotifAction(n)} className={`w-full text-right rounded p-2 border ${n.read ? "border-slate-200 bg-white" : "border-amber-400 bg-amber-50"}`} data-testid={`po-notif-${n.id}`}>
+                <div className="flex justify-between items-start gap-2">
+                  <div className="font-bold text-sm text-[#221340]">{n.title}</div>
+                  {!n.read && <span className="text-[9px] bg-red-600 text-white rounded-full px-2 py-0.5">جديد</span>}
+                </div>
+                <div className="text-xs text-slate-600 mt-1 whitespace-pre-line">{n.message}</div>
+                <div className="text-[10px] text-slate-400 mt-1">{fmtDate(n.created_at)}</div>
+              </button>
+            ))}
+          </div>
+        </DialogContent>
       </Dialog>
       <Dialog open={showIncentives} onOpenChange={setShowIncentives}>
         <DialogContent className="max-w-md" data-testid="po-incentives-dialog">
