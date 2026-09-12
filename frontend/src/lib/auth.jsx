@@ -27,7 +27,7 @@ export const AuthProvider = ({ children }) => {
   const logout = () => {
     localStorage.removeItem("jwd_token");
     setUser(null);
-    window.location.href = "/login";
+    window.location.href = "/mof30";
   };
 
   const hasPerm = (p) => user?.role === "admin" || (user?.permissions || []).includes(p);

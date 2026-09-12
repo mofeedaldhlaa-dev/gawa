@@ -13,14 +13,14 @@ export default function Login() {
   const [password, setP] = useState("");
   const [loading, setLoading] = useState(false);
 
-  if (user) nav("/");
+  if (user) nav("/dashboard");
 
   const submit = async (e) => {
     e.preventDefault();
     setLoading(true);
     const ok = await login(username, password);
     setLoading(false);
-    if (ok) nav("/");
+    if (ok) nav("/dashboard");
   };
 
   return (
