@@ -54,9 +54,6 @@ export default function Login() {
               {loading ? "جاري..." : "دخول"}
             </Button>
           </form>
-          <div className="mt-4 flex justify-between text-sm">
-            <Link to="/order" className="text-[#452480] hover:underline" data-testid="link-order">هل أنت عميل؟ اطلب كرت</Link>
-          </div>
         </Card>
       </div>
     </div>
