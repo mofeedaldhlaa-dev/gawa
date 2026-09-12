@@ -12,14 +12,45 @@ import { fmt } from "@/lib/utils";
 import { Link } from "react-router-dom";
 import { Search, Plus, FileText, Edit, KeyRound, Eye, Power, PowerOff, Trash2 } from "lucide-react";
 
+function SpecialPricesEditor({ f, setF }) {
+  const [cats, setCats] = useState([]);
+  useEffect(() => { api.get("/categories").then((r) => setCats(r.data)).catch(() => {}); }, []);
+  const list = f.special_prices || [];
+  const setList = (v) => setF({ ...f, special_prices: v });
+  const addRow = () => setList([...list, { category_id: "", price: 0 }]);
+  const upd = (i, key, val) => setList(list.map((r, idx) => idx === i ? { ...r, [key]: val } : r));
+  const rm = (i) => setList(list.filter((_, idx) => idx !== i));
+  if (!f.special_prices_enabled) return null;
+  return (
+    <div className="rounded-lg border border-amber-300 bg-amber-50/40 p-3 space-y-2" data-testid="cust-special-prices">
+      <div className="flex justify-between items-center">
+        <div className="text-sm font-bold text-[#221340]">الأسعار الخاصة</div>
+        <Button type="button" size="sm" variant="outline" onClick={addRow} data-testid="sp-add">+ إضافة سعر</Button>
+      </div>
+      {list.map((row, i) => (
+        <div key={i} className="grid grid-cols-[1fr_auto_auto] gap-2 items-center">
+          <select value={row.category_id} onChange={(e) => upd(i, "category_id", e.target.value)} className="h-9 border rounded-md px-2 text-sm" data-testid={`sp-cat-${i}`}>
+            <option value="">— اختر الفئة —</option>
+            {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <Input type="number" value={row.price} onChange={(e) => upd(i, "price", Number(e.target.value) || 0)} placeholder="السعر" className="w-28" data-testid={`sp-price-${i}`}/>
+          <Button type="button" size="sm" variant="outline" onClick={() => rm(i)} className="border-red-300" data-testid={`sp-del-${i}`}><Trash2 size={12} className="text-red-600"/></Button>
+        </div>
+      ))}
+      {list.length === 0 && <div className="text-xs text-slate-500 text-center py-2">لا توجد أسعار خاصة — اضغط "إضافة سعر" لبدء التخصيص</div>}
+      <div className="text-[11px] text-slate-500">الفئات التي لم تُحدَّد لها سعر خاص تستخدم السعر العادي تلقائياً.</div>
+    </div>
+  );
+}
+
 function CustomerForm({ initial, onSaved, onClose }) {
-  const [f, setF] = useState(initial || { name: "", phone: "", password: "", credit_limit: 0, opening_balance: 0, address: "", notes: "", status: "active", customer_type: "customer" });
+  const [f, setF] = useState(initial || { name: "", phone: "", password: "", credit_limit: 0, opening_balance: 0, address: "", notes: "", status: "active", customer_type: "customer", special_prices_enabled: false, special_prices: [] });
   const [loading, setLoading] = useState(false);
   const submit = async (e) => {
     e.preventDefault();
     setLoading(true);
     try {
-      const body = { ...f, credit_limit: Number(f.credit_limit) || 0, opening_balance: Number(f.opening_balance) || 0 };
+      const body = { ...f, credit_limit: Number(f.credit_limit) || 0, opening_balance: Number(f.opening_balance) || 0, special_prices_enabled: !!f.special_prices_enabled, special_prices: (f.special_prices || []).filter((r) => r.category_id && Number(r.price) > 0).map((r) => ({ category_id: r.category_id, price: Number(r.price) })) };
       if (initial?.id) await api.put(`/customers/${initial.id}`, body);
       else await api.post("/customers", body);
       toast.success("تم الحفظ بنجاح");
@@ -46,6 +77,12 @@ function CustomerForm({ initial, onSaved, onClose }) {
       </div>
       <div><Label>العنوان</Label><Input value={f.address} onChange={(e) => setF({ ...f, address: e.target.value })} /></div>
       <div><Label>ملاحظات</Label><Textarea value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} /></div>
+      <label className="flex items-center gap-2 text-sm cursor-pointer border rounded-md p-2 bg-slate-50">
+        <input type="checkbox" checked={!!f.special_prices_enabled} onChange={(e) => setF({ ...f, special_prices_enabled: e.target.checked })} data-testid="cust-special-toggle"/>
+        <span className="font-bold text-[#221340]">تفعيل سعر خاص</span>
+        {f.special_prices_enabled && <span className="text-[10px] bg-amber-500 text-white rounded-full px-2 py-0.5 mr-auto">مفعل</span>}
+      </label>
+      <SpecialPricesEditor f={f} setF={setF}/>
       <Button type="submit" disabled={loading} className="w-full bg-[#221340]" data-testid="cust-save">{loading ? "جاري..." : "حفظ"}</Button>
     </form>
   );

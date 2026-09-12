@@ -10,6 +10,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { toast } from "sonner";
 import { fmt } from "@/lib/utils";
 import { Database, RotateCcw, Trash2, Download, Upload, Send, CloudDownload, Plus, Coins } from "lucide-react";
+import IncentivesManager from "@/pages/IncentivesManager";
 
 function CurrenciesManager() {
   const [items, setItems] = useState([]);
@@ -254,6 +255,7 @@ export default function SettingsPage() {
       <Card className="p-6 space-y-4" data-testid="currencies-panel">
         <div className="text-lg font-bold text-[#221340]">العملات المتعددة</div>
         <CurrenciesManager/>
+        <IncentivesManager/>
       </Card>
 
       <Card className="p-6 space-y-4">

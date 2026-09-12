@@ -85,6 +85,34 @@ export default function PublicOrder() {
   const [showStmtDialog, setShowStmtDialog] = useState(false);
   const [stmtStart, setStmtStart] = useState("");
   const [stmtEnd, setStmtEnd] = useState("");
+  const [incentives, setIncentives] = useState([]);
+
+  const loadIncentives = async (ph, pw) => {
+    try {
+      const r = await api.post("/public/card-order/incentives", { phone: ph || phone, password: pw || password });
+      setIncentives(r.data?.items || []);
+    } catch { setIncentives([]); }
+  };
+
+  const redeemIncentive = async (inc, mode) => {
+    try {
+      const r = await api.post(`/public/card-order/incentives/${inc.id}/redeem`, { phone, password, mode });
+      if (mode === "credit") {
+        toast.success(`تم تقييد ${fmt(r.data.value)} في حسابك بنجاح 🎁`);
+      } else {
+        toast.success(`تم تسليم ${r.data.qty} كرت حافز 🎁`);
+        if (r.data.cards?.length) {
+          setResult({ cards: r.data.cards, recipient_phone: null, balance_after: customer?.balance || 0 });
+        }
+      }
+      loadIncentives();
+      // Refresh customer balance
+      try {
+        const rc = await api.post("/public/card-order/login", { phone, password, device_id: phoneFingerprint() });
+        setCustomer(rc.data);
+      } catch {}
+    } catch (e) { toast.error(errText(e)); }
+  };
 
   const runPrintStatement = async ({ start = "", end = "" } = {}) => {
     setPrintingStmt(true);
@@ -145,6 +173,7 @@ export default function PublicOrder() {
       if (rememberMe) saveCredentials(phone, password);
       else clearSavedCredentials();
       toast.success(`مرحباً ${r.data.name}`);
+      loadIncentives(phone, password);
     } catch (err) {
       const status = err.response?.status;
       const msg = errText(err);
@@ -373,6 +402,32 @@ export default function PublicOrder() {
               <div className="text-sm text-slate-600">مرحباً بك</div>
               <div className="text-xl font-black text-[#221340] mt-1" data-testid="po-welcome-name">{customer.name}</div>
             </div>
+
+            {incentives.length > 0 && (
+              <Card className="p-3 bg-gradient-to-l from-amber-50 to-yellow-50 border-2 border-amber-400" data-testid="po-incentives">
+                <div className="text-center mb-2">
+                  <div className="text-2xl">🎁</div>
+                  <div className="font-black text-amber-800">مبروك! لديك حوافز مستحقة</div>
+                </div>
+                <div className="space-y-2">
+                  {incentives.map((inc) => (
+                    <div key={inc.id} className="bg-white rounded-lg p-2 border border-amber-200" data-testid={`po-inc-${inc.id}`}>
+                      <div className="flex justify-between items-center text-sm">
+                        <div>
+                          <div className="font-bold">{inc.category_name}</div>
+                          <div className="text-xs text-slate-500">من الفاتورة {inc.source_sale_number || "—"}</div>
+                        </div>
+                        <div className="text-lg font-black text-amber-700">{inc.qty} كرت</div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-1 mt-2">
+                        <Button size="sm" onClick={() => redeemIncentive(inc, "card")} className="bg-[#D4AF37] text-[#1A0F33] hover:bg-[#C5A028] text-xs" data-testid={`po-inc-card-${inc.id}`}>استلام كرت الحافز</Button>
+                        <Button size="sm" onClick={() => redeemIncentive(inc, "credit")} variant="outline" className="border-[#452480] text-[#452480] text-xs" data-testid={`po-inc-credit-${inc.id}`}>تقييد المبلغ في حسابي</Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            )}
             <Card className="p-3 bg-slate-50">
               <div className="flex justify-between items-start">
                 <div>

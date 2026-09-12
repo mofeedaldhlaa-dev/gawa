@@ -8,24 +8,31 @@ Arabic (RTL) full-stack ERP for شبكة جواد نت اللاسلكية.
 - `/mof30` → ONLY entry for Admin/Users login.
 - `/login`, `/mof`, unknown → redirect to `/`.
 
-## Recent Delivery (2026-02, iter 11)
-### ✅ Statement cleanup (Item 1 of the big update)
-- Editing / deleting a sale, purchase, or receipt no longer inserts extra "تعديل / حذف / عكس" rows into the customer/supplier ledger.
-- Uses new helper `_remove_ledger_by_op(party_type, party_id, op_number)` — removes the original ledger entry(ies) and adjusts the party balance in place.
-- Applied to: `delete_sale`, `delete_purchase`, `delete_receipt`, `edit_sale` (full + quick), `edit_receipt`.
-- Audit log still records the operation (who + when + before/after) — statement remains clean.
+## Delivered (2026-02)
 
-### ✅ Bank Accounts (Items 9-11)
-- New collection `bank_accounts` and CRUD endpoints (`/api/bank-accounts`, GET filter `show_in=`).
-- New admin page `/bank-accounts`.
+### Statement cleanup
+- Editing / deleting sale/purchase/receipt now removes the ORIGINAL ledger entry (via `_remove_ledger_by_op`) so no "تعديل / حذف / عكس" noise in customer/supplier statements.
+
+### Bank Accounts
+- Collection `bank_accounts` + full CRUD + admin page `/bank-accounts`.
 - Per-bank visibility flags: `invoices` / `receipts` / `payment_requests` / `over_limit`.
-- Print output (Sales/Purchases invoices + Receipts) now appends a "للسداد عبر:" section with all active banks whose `show_in` matches — gold-accent card style, works in browser print.
-- Inactive banks or banks not tagged for a location never appear.
-- Sales.jsx / Purchases.jsx / Receipts.jsx now fetch `/bank-accounts` and pass `banks` to the print helpers.
+- Auto-appended to printed invoices and receipts in a gold-accent block.
 
-## Backlog from the big update (still to do — Phase 2 of this request)
-- **Item 2**: Special sale prices per customer / POS (independent price maps + toggle "تفعيل سعر خاص").
-- **Items 3-8**: Incentives system (rules per customer / POS, auto-earning on sale, exclude special-price accounts, redeem as card or credit from PublicOrder).
+### Special Prices (per customer / per POS)
+- Customer form has "تفعيل سعر خاص" toggle + list editor (category + price).
+- Backend fields `special_prices_enabled`, `special_prices: [{category_id, price}]`.
+- `create_sale` price resolution precedence: special_prices → cat.sale_price_pos/customer → cat.sale_price.
+- Independent per account — customer prices never affect POS and vice-versa.
+
+### Incentives System
+- Settings section "الحوافز" with 3 toggles: customer_enabled, pos_enabled, exclude_special_price.
+- Collection `incentive_rules` per account_type (customer / pos), CRUD, per-rule active flag.
+- Auto-earning on sale via `_apply_incentive_on_sale` (non-fatal, per-category qty ÷ buy × reward).
+- Pending earnings stored in `incentive_earnings`.
+- Deleting a sale drops its pending earnings (redeemed ones are kept forever).
+- Public endpoints `/public/card-order/incentives` (list) + `/public/card-order/incentives/{id}/redeem?mode=card|credit`.
+- PublicOrder screen shows "🎁 مبروك! لديك حوافز مستحقة" card with two buttons: **استلام كرت الحافز** and **تقييد المبلغ في حسابي**.
+- Duplicate-redeem prevented by status transitions (`pending → redeemed_card | redeemed_credit`).
 
 ## Auth
 - Admins strictly exempt from device-binding.
@@ -40,5 +47,8 @@ Arabic (RTL) full-stack ERP for شبكة جواد نت اللاسلكية.
 - admin / admin123, MOF / admin123
 - Per-deploy admin auto-created (see backend.err.log `[DEPLOY-SEED]`).
 
-## Test Reports
-- /app/test_reports/iteration_10.json — 13/13 PASS
+## Backlog
+- P1: Refactor server.py (>3800 lines) into modular routers.
+- P2: Biometric (WebAuthn/Passkeys) login.
+- P2: Payment-request notifications & over-limit alerts to consume `bank_accounts` filter for those `show_in` values.
+- P2: MongoDB Atlas migration.

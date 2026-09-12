@@ -326,6 +326,10 @@ class UserIn(BaseModel):
     status: str = "active"
     permissions: List[str] = []
 
+class SpecialPrice(BaseModel):
+    category_id: str
+    price: float
+
 class CustomerIn(BaseModel):
     name: str
     phone: Optional[str] = ""
@@ -336,6 +340,8 @@ class CustomerIn(BaseModel):
     notes: Optional[str] = ""
     status: str = "active"
     customer_type: str = "customer"  # customer / pos
+    special_prices_enabled: Optional[bool] = False
+    special_prices: Optional[List[SpecialPrice]] = []
 
 class SupplierIn(BaseModel):
     name: str
@@ -1180,6 +1186,164 @@ async def _remove_ledger_by_op(party_type: str, party_id: str, op_number: str):
     return delta
 
 
+# ================= INCENTIVES =================
+async def _get_incentive_settings():
+    doc = await db.settings.find_one({"_key": "incentives"}) or {}
+    return {
+        "customer_enabled": bool(doc.get("customer_enabled", False)),
+        "pos_enabled": bool(doc.get("pos_enabled", False)),
+        "exclude_special_price": bool(doc.get("exclude_special_price", False)),
+    }
+
+async def _apply_incentive_on_sale(sale_doc: dict, customer: Optional[dict]):
+    """After a sale is created, check incentive rules and record earnings.
+    Non-fatal: never raises."""
+    if not customer or not sale_doc.get("customer_id"):
+        return
+    settings = await _get_incentive_settings()
+    ctype = customer.get("customer_type", "customer")
+    if ctype == "pos" and not settings["pos_enabled"]: return
+    if ctype != "pos" and not settings["customer_enabled"]: return
+    if settings["exclude_special_price"] and customer.get("special_prices_enabled"): return
+    # sum quantity per category from this sale
+    per_cat: Dict[str, int] = {}
+    for it in sale_doc.get("items") or []:
+        cid = it.get("category_id"); qty = int(it.get("quantity") or 0)
+        if cid and qty > 0: per_cat[cid] = per_cat.get(cid, 0) + qty
+    rules = await db.incentive_rules.find({"account_type": ctype, "active": True}).to_list(500)
+    for r in rules:
+        cid = r.get("category_id"); buy = int(r.get("buy_qty") or 0); reward = int(r.get("reward_qty") or 0)
+        if not cid or buy <= 0 or reward <= 0: continue
+        qty = per_cat.get(cid, 0)
+        if qty < buy: continue
+        earned = (qty // buy) * reward
+        if earned <= 0: continue
+        cat = await db.card_categories.find_one({"id": cid}) or {}
+        await db.incentive_earnings.insert_one({
+            "id": str(uuid.uuid4()),
+            "customer_id": sale_doc["customer_id"],
+            "category_id": cid,
+            "category_name": cat.get("name", ""),
+            "unit_value": cat.get("sale_price_customer") or cat.get("sale_price", 0),
+            "qty": earned,
+            "source_sale_id": sale_doc.get("id"),
+            "source_sale_number": sale_doc.get("number"),
+            "status": "pending",
+            "created_at": now_iso(),
+        })
+
+
+class IncentiveRuleIn(BaseModel):
+    account_type: str  # customer / pos
+    category_id: str
+    buy_qty: int
+    reward_qty: int
+    active: Optional[bool] = True
+
+class IncentiveSettingsIn(BaseModel):
+    customer_enabled: Optional[bool] = False
+    pos_enabled: Optional[bool] = False
+    exclude_special_price: Optional[bool] = False
+
+@api.get("/incentive-settings")
+async def get_incentive_settings(user=Depends(get_current_user)):
+    return await _get_incentive_settings()
+
+@api.put("/incentive-settings")
+async def set_incentive_settings(data: IncentiveSettingsIn, user=Depends(require_perm("settings"))):
+    payload = data.model_dump()
+    payload["_key"] = "incentives"
+    await db.settings.update_one({"_key": "incentives"}, {"$set": payload}, upsert=True)
+    return await _get_incentive_settings()
+
+@api.get("/incentive-rules")
+async def list_incentive_rules(user=Depends(get_current_user)):
+    items = await db.incentive_rules.find().sort("created_at", -1).to_list(500)
+    return [clean_doc(r) for r in items]
+
+@api.post("/incentive-rules")
+async def create_incentive_rule(data: IncentiveRuleIn, user=Depends(require_perm("settings"))):
+    if data.account_type not in ("customer", "pos"):
+        raise HTTPException(status_code=400, detail="نوع الحساب غير صالح")
+    doc = data.model_dump()
+    doc["id"] = str(uuid.uuid4())
+    doc["created_at"] = now_iso()
+    await db.incentive_rules.insert_one(doc)
+    return clean_doc(doc)
+
+@api.put("/incentive-rules/{rid}")
+async def update_incentive_rule(rid: str, data: IncentiveRuleIn, user=Depends(require_perm("settings"))):
+    r = await db.incentive_rules.update_one({"id": rid}, {"$set": data.model_dump()})
+    if r.matched_count == 0: raise HTTPException(status_code=404, detail="غير موجود")
+    doc = await db.incentive_rules.find_one({"id": rid})
+    return clean_doc(doc)
+
+@api.delete("/incentive-rules/{rid}")
+async def delete_incentive_rule(rid: str, user=Depends(require_perm("settings"))):
+    await db.incentive_rules.delete_one({"id": rid})
+    return {"ok": True}
+
+
+# Public: view + redeem incentives from the card-order screen
+class PublicAuth(BaseModel):
+    phone: str
+    password: str
+
+class IncentiveRedeemIn(PublicAuth):
+    mode: str  # "card" | "credit"
+
+async def _verify_public_customer(phone: str, password: str):
+    c = await db.customers.find_one({"phone": phone})
+    if not c or c.get("password") != password:
+        raise HTTPException(status_code=401, detail="بيانات غير صحيحة")
+    if c.get("status") == "disabled":
+        raise HTTPException(status_code=403, detail="الحساب معطل")
+    return c
+
+@api.post("/public/card-order/incentives")
+async def public_list_incentives(data: PublicAuth):
+    c = await _verify_public_customer(data.phone, data.password)
+    items = await db.incentive_earnings.find({"customer_id": c["id"], "status": "pending"}).sort("created_at", 1).to_list(200)
+    return {"customer_id": c["id"], "items": [clean_doc(x) for x in items]}
+
+@api.post("/public/card-order/incentives/{eid}/redeem")
+async def public_redeem_incentive(eid: str, data: IncentiveRedeemIn):
+    c = await _verify_public_customer(data.phone, data.password)
+    earn = await db.incentive_earnings.find_one({"id": eid, "customer_id": c["id"]})
+    if not earn: raise HTTPException(status_code=404, detail="الحافز غير موجود")
+    if earn.get("status") != "pending":
+        raise HTTPException(status_code=400, detail="تم صرف الحافز مسبقاً")
+    qty = int(earn.get("qty") or 0)
+    cid = earn.get("category_id")
+    if data.mode == "credit":
+        unit = float(earn.get("unit_value") or 0)
+        value = unit * qty
+        # Credit the customer's balance (reduce debt / add positive credit).
+        # Uses ledger op_number tied to earning id for cleanliness.
+        await _adjust_party_balance("customer", c["id"], -value, f"INC-{eid[:8]}", f"حافز {earn.get('category_name','')} × {qty}")
+        await db.incentive_earnings.update_one({"id": eid}, {"$set": {"status": "redeemed_credit", "redeemed_at": now_iso(), "redeemed_value": value}})
+        return {"ok": True, "mode": "credit", "value": value}
+    else:
+        # Deliver cards (numbered first, then quantity stock — same policy as sales).
+        avail_num = await db.cards.count_documents({"category_id": cid, "status": "available"})
+        stock = await db.stock.find_one({"category_id": cid})
+        avail_qty = (stock or {}).get("total", 0) - (stock or {}).get("sold", 0) if stock else 0
+        if avail_num + avail_qty < qty:
+            raise HTTPException(status_code=400, detail="لا يوجد رصيد كافٍ من الكروت لتسليم الحافز")
+        take_num = min(qty, avail_num)
+        cards_delivered = []
+        if take_num > 0:
+            picks = await db.cards.find({"category_id": cid, "status": "available"}).limit(take_num).to_list(take_num)
+            ids = [x["id"] for x in picks]
+            cards_delivered = [x["number"] for x in picks]
+            await db.cards.update_many({"id": {"$in": ids}}, {"$set": {"status": "sold", "sold_at": now_iso(), "sold_to": c["id"]}})
+        take_qty = qty - take_num
+        if take_qty > 0:
+            await db.stock.update_one({"category_id": cid}, {"$inc": {"sold": take_qty}})
+        await db.incentive_earnings.update_one({"id": eid}, {"$set": {"status": "redeemed_card", "redeemed_at": now_iso(), "cards": cards_delivered}})
+        return {"ok": True, "mode": "card", "cards": cards_delivered, "qty": qty}
+
+
 @api.post("/sales")
 async def create_sale(data: SaleIn, user=Depends(require_perm("sales"))):
     # Idempotency
@@ -1214,15 +1378,25 @@ async def create_sale(data: SaleIn, user=Depends(require_perm("sales"))):
             if limit > 0 and new_balance > limit:
                 raise HTTPException(status_code=400, detail=f"لا يمكن تنفيذ العملية لأنها تتجاوز سقف حساب العميل ({limit})")
 
-    # Auto-pricing based on customer_type if price not set explicitly per item
+    # Auto-pricing based on customer_type if price not set explicitly per item.
+    # Precedence: customer.special_prices (if enabled) > cat.sale_price_pos/customer > cat.sale_price.
     if customer:
         ctype = customer.get("customer_type", "customer")
+        sp_enabled = bool(customer.get("special_prices_enabled"))
+        sp_map = { (sp.get("category_id")): float(sp.get("price") or 0)
+                   for sp in (customer.get("special_prices") or [])
+                   if sp.get("category_id") and sp.get("price") is not None }
         for i, item in enumerate(data.items):
             if item.price <= 0:
-                cat = await db.card_categories.find_one({"id": item.category_id})
-                if cat:
-                    p = cat.get("sale_price_pos") if ctype == "pos" else cat.get("sale_price_customer")
-                    if p is None: p = cat.get("sale_price", 0)
+                p = None
+                if sp_enabled and item.category_id in sp_map:
+                    p = sp_map[item.category_id]
+                if p is None:
+                    cat = await db.card_categories.find_one({"id": item.category_id})
+                    if cat:
+                        p = cat.get("sale_price_pos") if ctype == "pos" else cat.get("sale_price_customer")
+                        if p is None: p = cat.get("sale_price", 0)
+                if p is not None:
                     items_final[i]["price"] = p
                     items_final[i]["total"] = items_final[i]["quantity"] * p
 
@@ -1281,6 +1455,12 @@ async def create_sale(data: SaleIn, user=Depends(require_perm("sales"))):
     }
     await db.sales.insert_one(doc)
 
+    # Incentive earnings (customer/pos) — best-effort, never blocks the sale
+    try:
+        await _apply_incentive_on_sale(doc, customer)
+    except Exception as _e:
+        logger.warning(f"incentive apply failed: {_e}")
+
     balance_after = None
     if data.customer_id and remaining > 0:
         balance_after = await _adjust_party_balance("customer", data.customer_id, remaining, number, f"فاتورة مبيعات {number}")
@@ -1330,6 +1510,11 @@ async def delete_sale(sid: str, user=Depends(require_perm("delete_ops"))):
         if doc.get("customer_id") and doc.get("number"):
             await _remove_ledger_by_op("customer", doc["customer_id"], doc["number"])
         await _reverse_sale_inventory(doc.get("items", []))
+        # Drop any pending incentive earnings from this sale (redeemed ones are kept)
+        try:
+            await db.incentive_earnings.delete_many({"source_sale_id": sid, "status": "pending"})
+        except Exception:
+            pass
     await db.sales.delete_one({"id": sid})
     await audit_log(user, f"حذف فاتورة مبيعات {doc.get('number','')}", "sale", sid, {"number": doc.get("number"), "total": doc.get("total")}, None)
     return {"ok": True}
