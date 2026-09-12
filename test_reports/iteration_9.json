@@ -1,0 +1,24 @@
+{
+  "summary": "Backend regression testing for the admin-device-exemption fix. Created new pytest file /app/backend/tests/test_admin_device_exempt.py covering all 5 review scenarios. All 5 tests PASS. The fix in server.py (~line 518) correctly (a) allows admin role (MOFEED, admin, MOF) to log in from any device without persisting bound_device, (b) still device-binds non-admin users on first login and returns 403 on a mismatched second device, and (c) leaves the /api/users/{uid}/unbind-device endpoint returning ok:true.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_admin_device_exempt.py",
+    "/app/test_reports/pytest/iter9_admin_device.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is 3547 lines — should be split into modules (auth, users, sales, etc.) for maintainability.",
+    "Device-binding uses role check `role == 'admin'`. If future admin-equivalent roles are added (e.g., 'super_admin'), this branch must be updated. Consider a permission-based check or a helper is_privileged(user)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_admin_device_exempt.py"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "not tested (backend-only request)"},
+  "test_credentials": "MOFEED/EeFSWtdsFRBmb3p, admin/admin123, MOF/admin123 (all confirmed working from any device).",
+  "seed_data_creation": "Test created and then deleted a normal user TEST_bounduser1 during regression; teardown fixture removes it and clears any bound_device on admins.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Fix verified end-to-end: admin role is exempt from device binding, normal users still bound. Unbind endpoint intact. Frontend PublicOrder header test was in the review list but marked as backend-only testing_type; frontend behaviour not re-verified this iteration (already covered in iteration 7-8).",
+  "rca of the issue": "Prior behaviour bound the FIRST successful admin login to a device and returned 403 on a mismatched second device. Fix adds `is_admin = user.get('role') == 'admin'` and gates both the mismatch check and the bound_device write with `not is_admin`, so admins are never bound. Verified in /app/backend/server.py lines 515-529."
+}

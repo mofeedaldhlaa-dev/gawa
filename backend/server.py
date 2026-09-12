@@ -512,15 +512,18 @@ async def login(data: LoginIn):
         raise HTTPException(status_code=401, detail="بيانات الدخول غير صحيحة")
     if user.get("status") == "disabled":
         raise HTTPException(status_code=403, detail="الحساب معطل")
-    # Device binding: first successful login binds; later logins must match
+    # Device binding: first successful login binds; later logins must match.
+    # EXCEPTION: admin role is NEVER device-bound so a super-admin can always
+    # log in from any device (owner recovery, fallback laptop, etc.).
+    is_admin = user.get("role") == "admin"
     bound = user.get("bound_device")
-    if bound and incoming_device and bound != incoming_device:
+    if not is_admin and bound and incoming_device and bound != incoming_device:
         raise HTTPException(
             status_code=403,
             detail="هذا الحساب مرتبط بجهاز آخر. يرجى استخدام الجهاز المرتبط أو التواصل مع مدير النظام لفك الربط.",
         )
     bind_update: Dict[str, Any] = {"last_login": now_iso(), "failed_attempts": 0, "locked_until": None}
-    if not bound and incoming_device:
+    if not is_admin and not bound and incoming_device:
         bind_update["bound_device"] = incoming_device
         bind_update["bound_device_at"] = now_iso()
     await db.users.update_one({"id": user["id"]}, {"$set": bind_update})

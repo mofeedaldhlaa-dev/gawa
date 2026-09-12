@@ -1,0 +1,35 @@
+{
+  "summary": "Verified both fixes: (A) Frontend conditional visibility of po-header-welcome / po-welcome on /order works correctly — before login the header shows 'شبكة جواد نت اللاسلكية' + 'مرحباً بك / قم بتسجيل الدخول' (data-testid=po-header-welcome); after successful customer login the po-header-welcome is HIDDEN and the post-login banner (data-testid=po-welcome, po-welcome-name='مفيد عبده') is shown; after reload/logout the po-header-welcome reappears. (B) Backend admin logins MOFEED/EeFSWtdsFRBmb3p and admin/admin123 succeed and both return role='admin' with 18 permissions and a token; the /api/users/{uid}/unbind-device endpoint works and after unbind the account can log in from a brand new device_id. HOWEVER — the review requirement 'no device binding blocks it' for admin accounts is NOT met: on the very next login from a different device_id, MOFEED is again rejected with HTTP 403 'هذا الحساب مرتبط بجهاز آخر'. server.py:517 enforces device binding for ALL roles (including admin). This reproduces the original user complaint whenever MOFEED logs in from device-A then tries device-B.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "POST /api/auth/login", "issue": "Admin role is NOT exempt from device binding. After first successful login binds a device, any subsequent login from a different device_id returns 403 with 'هذا الحساب مرتبط بجهاز آخر'. Review explicitly requires admin (MOFEED/admin/MOF) to login from ANY device_id. Fix: in server.py around line 516-521, skip the binding check (or skip the bind-set) when user.get('role') == 'admin'.", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "POST /api/public/card-order/login", "issue": "Review request document used field name 'device_fingerprint' but the actual model field is 'device_id'. Endpoint path is /api/public/card-order/login (not /api/public/customer/login). Not a bug, just aligns docs."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_admin_login_device.py",
+    "/app/test_reports/pytest/admin_login_device.xml"
+  ],
+  "action_items": [
+    "server.py login endpoint (~line 516): exempt users with role=='admin' from device binding entirely so MOFEED/admin/MOF can log in from any device without needing an unbind step. Suggested patch: `if bound and incoming_device and bound != incoming_device and user.get('role') != 'admin': raise HTTPException(...)` AND `if not bound and incoming_device and user.get('role') != 'admin': bind_update[...] = ...`.",
+    "Consider adding an explicit logout button on /order for customer sessions (currently only reloading the page clears the local `customer` state). Not blocking."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 3544 lines — should be split into modules (auth, users, customers, cards, etc.) for maintainability.",
+    "Device binding logic is duplicated between admin login (line 516-525) and customer public login (line 2418-2431); consider extracting a helper.",
+    "PublicOrder.jsx (~786 lines) also getting large; consider splitting the login form, order form and result panels into sub-components."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_admin_login_device.py"
+  ],
+  "success_rate": {"backend": "80% (4/5 pytest cases pass; the failing one documents the required admin-device-exempt behaviour)", "frontend": "100%"},
+  "test_credentials": "MOFEED / EeFSWtdsFRBmb3p, admin / admin123, MOF / admin123 (all admin, 18 perms). Sample customer for /order: phone=738758075 password=test1234 (name='مفيد عبده'). Additional customers with plaintext password in DB: 738758975, 773019030, 778758975, 773019020.",
+  "seed_data_creation": "None. Only side effects: unbound bound_device on admin users and on customer phone 738758075 (via direct Mongo update) to make the flow testable; deleted public_blocks entry for 738758075.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Frontend header conditional rendering fix is verified good on mobile viewport 390x844 at REACT_APP_BACKEND_URL/order. Backend admin login + unbind endpoint work. The remaining item is a business-logic decision: exempt admin role from device binding in server.py:516-525. When retesting, first run: db.users.update_many({'role':'admin'},{'$unset':{'bound_device':'','bound_device_at':'','locked_until':''},'$set':{'failed_attempts':0}}) to normalise state; then run `pytest /app/backend/tests/test_admin_login_device.py -n 0 -v`.",
+  "rca of the issue": "Original user report was accurate: MOFEED could not log in because their user document had bound_device set from a previous session. The main agent's recovery script (one-off DB update) cleared bound_device, so a single login now succeeds — but the login flow at server.py:517-525 immediately re-binds the account to whatever device_id the first successful client sends, so the SAME 'الحساب مرتبط بجهاز آخر' error re-appears on any subsequent different-device login. The frontend UX fix (hiding po-header-welcome after login) is fully correct and verified. To fully close the user's bug, the login endpoint must skip device-binding for admin role (patch shown in action_items)."
+}

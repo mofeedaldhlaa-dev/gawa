@@ -293,10 +293,12 @@ export default function PublicOrder() {
       <Card className="w-full max-w-md p-6 bg-white shadow-2xl border-0 rounded-2xl">
         <div className="text-center mb-6">
           <div className="text-2xl font-black text-[#221340] tracking-tight">شبكة جواد نت اللاسلكية</div>
-          <div className="mt-3 text-[15px] text-slate-600 leading-6">
-            مرحباً بك<br/>
-            <span className="text-[#452480] font-bold">قم بتسجيل الدخول</span>
-          </div>
+          {!customer && (
+            <div className="mt-3 text-[15px] text-slate-600 leading-6" data-testid="po-header-welcome">
+              مرحباً بك<br/>
+              <span className="text-[#452480] font-bold">قم بتسجيل الدخول</span>
+            </div>
+          )}
           <div className="mt-4 inline-block bg-gradient-to-l from-[#D4AF37] to-[#F2D06B] text-[#1A0F33] px-6 py-2 rounded-full font-bold text-lg shadow-md">طلب كرت</div>
         </div>
 
