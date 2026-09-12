@@ -43,7 +43,8 @@ export default function Reports() {
   const [incPeriod, setIncPeriod] = useState("month");
   const [incStart, setIncStart] = useState(_iso(_startOfMonth()));
   const [incEnd, setIncEnd] = useState(_iso(new Date()));
-  const [incData, setIncData] = useState({ items: [], count: 0, total_qty: 0, total_value: 0 });
+  const [incData, setIncData] = useState({ items: [], count: 0, total_qty: 0, total_value: 0, kind: "redeemed" });
+  const [incKind, setIncKind] = useState("redeemed"); // redeemed | pending
 
   useEffect(() => { api.get("/categories").then((r) => setCategories(r.data)).catch(() => {}); }, []);
 
@@ -83,11 +84,12 @@ export default function Reports() {
   };
   const loadIncentives = async () => {
     try {
-      const r = await api.get("/reports/incentives", { params: { start: incStart, end: incEnd } });
+      const params = incKind === "pending" ? { kind: "pending" } : { start: incStart, end: incEnd, kind: "redeemed" };
+      const r = await api.get("/reports/incentives", { params });
       setIncData(r.data);
-    } catch (e) { toast.error(errText(e)); setIncData({ items: [], count: 0, total_qty: 0, total_value: 0 }); }
+    } catch (e) { toast.error(errText(e)); setIncData({ items: [], count: 0, total_qty: 0, total_value: 0, kind: incKind }); }
   };
-  useEffect(() => { if (tab === "incentives") loadIncentives(); /* eslint-disable-next-line */ }, [tab]);
+  useEffect(() => { if (tab === "incentives") loadIncentives(); /* eslint-disable-next-line */ }, [tab, incKind]);
 
   const orderLogFiltered = useMemo(() => {
     if (tab !== "card_order_log") return [];
@@ -271,15 +273,26 @@ export default function Reports() {
           {tab === "incentives" && (
             <>
               <div className="w-full">
-                <label className="text-xs">الفترة</label>
-                <div className="flex flex-wrap gap-1 mt-1">
-                  {[["day","يومي"],["month","شهري"],["year","سنوي"],["custom","مخصص"]].map(([k,l]) => (
-                    <button key={k} onClick={() => applyIncentivePeriod(k)} className={`px-2 py-1 rounded-full text-xs border ${incPeriod===k?"bg-[#452480] text-white border-[#452480]":"border-slate-300"}`} data-testid={`inc-period-${k}`}>{l}</button>
-                  ))}
+                <label className="text-xs">النوع</label>
+                <div className="flex gap-1 mt-1">
+                  <button onClick={() => setIncKind("redeemed")} className={`px-3 py-1 rounded-full text-xs border ${incKind==="redeemed"?"bg-[#452480] text-white border-[#452480]":"border-slate-300"}`} data-testid="inc-kind-redeemed">الحوافز المصروفة</button>
+                  <button onClick={() => setIncKind("pending")} className={`px-3 py-1 rounded-full text-xs border ${incKind==="pending"?"bg-amber-500 text-white border-amber-500":"border-slate-300"}`} data-testid="inc-kind-pending">الحوافز غير المصروفة</button>
                 </div>
               </div>
-              <div><label className="text-xs">من</label><Input type="date" value={incStart} onChange={(e) => { setIncStart(e.target.value); setIncPeriod("custom"); }} data-testid="inc-start"/></div>
-              <div><label className="text-xs">إلى</label><Input type="date" value={incEnd} onChange={(e) => { setIncEnd(e.target.value); setIncPeriod("custom"); }} data-testid="inc-end"/></div>
+              {incKind === "redeemed" && (
+                <>
+                  <div className="w-full">
+                    <label className="text-xs">الفترة</label>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {[["day","يومي"],["month","شهري"],["year","سنوي"],["custom","مخصص"]].map(([k,l]) => (
+                        <button key={k} onClick={() => applyIncentivePeriod(k)} className={`px-2 py-1 rounded-full text-xs border ${incPeriod===k?"bg-[#452480] text-white border-[#452480]":"border-slate-300"}`} data-testid={`inc-period-${k}`}>{l}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div><label className="text-xs">من</label><Input type="date" value={incStart} onChange={(e) => { setIncStart(e.target.value); setIncPeriod("custom"); }} data-testid="inc-start"/></div>
+                  <div><label className="text-xs">إلى</label><Input type="date" value={incEnd} onChange={(e) => { setIncEnd(e.target.value); setIncPeriod("custom"); }} data-testid="inc-end"/></div>
+                </>
+              )}
               <Button onClick={loadIncentives} className="bg-[#221340] w-full sm:w-auto" data-testid="inc-load">عرض</Button>
             </>
           )}
@@ -312,13 +325,31 @@ export default function Reports() {
 }
 
 const IncentivesTable = ({ data, query }) => {
+  const kind = data?.kind || "redeemed";
   const items = (data?.items || []).filter((r) => !query || JSON.stringify(r).toLowerCase().includes(query.toLowerCase()));
   return (
     <Card className="mt-3 overflow-x-auto" data-testid="inc-table">
       <table className="w-full text-sm">
-        <thead className="bg-slate-50"><tr className="text-right"><th className="p-2">التاريخ</th><th className="p-2">العميل</th><th className="p-2">النوع</th><th className="p-2">الفئة</th><th className="p-2">الكمية</th><th className="p-2">طريقة الاستفادة</th><th className="p-2">المبلغ</th><th className="p-2">المستخدم</th></tr></thead>
+        <thead className="bg-slate-50">
+          {kind === "pending" ? (
+            <tr className="text-right"><th className="p-2">العميل</th><th className="p-2">النوع</th><th className="p-2">الفئة</th><th className="p-2">المشتراة</th><th className="p-2">القاعدة</th><th className="p-2">المستحق</th><th className="p-2">القيمة</th><th className="p-2">الحالة</th></tr>
+          ) : (
+            <tr className="text-right"><th className="p-2">التاريخ</th><th className="p-2">العميل</th><th className="p-2">النوع</th><th className="p-2">الفئة</th><th className="p-2">الكمية</th><th className="p-2">طريقة الاستفادة</th><th className="p-2">المبلغ</th><th className="p-2">المستخدم</th></tr>
+          )}
+        </thead>
         <tbody>
-          {items.map((r) => (
+          {items.map((r) => kind === "pending" ? (
+            <tr key={r.id} className="border-t bg-amber-50/40">
+              <td className="p-2">{r.customer_name || "-"}</td>
+              <td className="p-2">{r.customer_type === "pos" ? "نقطة بيع" : "عميل"}</td>
+              <td className="p-2">{r.category_name || "-"}</td>
+              <td className="p-2 num">{r.bought}</td>
+              <td className="p-2 text-xs">{r.buy_qty}/{r.reward_qty}</td>
+              <td className="p-2 num font-bold text-amber-700">{r.qty}</td>
+              <td className="p-2 num">{fmt(r.redeemed_value || 0)}</td>
+              <td className="p-2 text-xs text-slate-600">{r.status_text || "مستحق"}</td>
+            </tr>
+          ) : (
             <tr key={r.id} className="border-t">
               <td className="p-2">{fmtDate(r.redeemed_at || r.created_at)}</td>
               <td className="p-2">{r.customer_name || "-"}</td>
@@ -330,15 +361,15 @@ const IncentivesTable = ({ data, query }) => {
               <td className="p-2 text-xs">{r.redeemed_by || "-"}</td>
             </tr>
           ))}
-          {items.length === 0 && <tr><td colSpan={8} className="p-6 text-center text-slate-400">لا توجد حوافز مصروفة في الفترة المحددة</td></tr>}
+          {items.length === 0 && <tr><td colSpan={8} className="p-6 text-center text-slate-400">{kind === "pending" ? "لا توجد حوافز غير مصروفة" : "لا توجد حوافز مصروفة في الفترة المحددة"}</td></tr>}
         </tbody>
         <tfoot>
           <tr className="bg-slate-100 font-bold">
-            <td colSpan={4} className="p-2">الإجمالي: {items.length} عملية</td>
+            <td colSpan={kind === "pending" ? 5 : 4} className="p-2">الإجمالي: {items.length} {kind === "pending" ? "سطر" : "عملية"}</td>
             <td className="p-2 num">{(data?.total_qty) || 0}</td>
-            <td></td>
+            {kind === "pending" ? null : <td></td>}
             <td className="p-2 num">{fmt(data?.total_value || 0)}</td>
-            <td></td>
+            {kind === "pending" ? null : <td></td>}
           </tr>
         </tfoot>
       </table>

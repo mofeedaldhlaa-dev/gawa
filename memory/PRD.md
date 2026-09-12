@@ -7,38 +7,47 @@ Arabic (RTL) full-stack ERP for شبكة جواد نت اللاسلكية.
 - `/` → PublicOrder (customer card window). Only entry for customers.
 - `/mof30` → ONLY entry for Admin/Users login.
 
-## Latest Fixes (2026-02, iter 13)
-- **Incentives button now ALWAYS visible** in PublicOrder data card (styled amber when enabled/history, muted otherwise).
-- **Incentives Report Tab** added to `/reports` with daily/monthly/yearly/custom filters, print support, `data-testid="rep-incentives"`, `inc-table`, `inc-period-day|month|year|custom`.
-- **Payment request auto-injects banks** — frontend now uses `r.data.message` returned by the backend which already contains the "بيانات السداد" block with all banks tagged `payment_requests`. Verified: `message includes bank: True`.
+## Latest Fixes (2026-02, iter 14)
+### 1) Incentives Dialog in PublicOrder
+- Root cause: my earlier `Dialog open={showIncentives}` block ended up outside the main return. Now added correctly next to `showStmtDialog` at line 682.
+- Content shows per-category rows (bought/redeemed/pending), rule text, Arabic status, redeem buttons, and history list.
 
-## Cumulative Incentive System
-- Pending earnings computed dynamically per (customer, category) from all active sales.
-- Multiple invoices, multiple days, cash+credit+electronic — all counted together.
-- Remainder carries forward. Categories independent.
-- Redemption creates permanent history in `incentive_earnings`.
-- `exclude_special_price` skips accounts with `special_prices_enabled=true`.
+### 2) Incentives Report: Redeemed + Unredeemed Toggle
+- `GET /api/reports/incentives?kind=redeemed|pending` (default: redeemed).
+- `pending`: iterates all customers with rules, computes pending per category dynamically.
+- `redeemed`: filters `incentive_earnings` by date range.
+- Frontend Reports page has a toggle (data-testid `inc-kind-redeemed` / `inc-kind-pending`). Table columns adapt to mode.
 
-## Public Endpoints
-- `POST /public/card-order/incentives` — dynamic summary + history for logged-in customer.
-- `POST /public/card-order/incentives/redeem` — mode: card|credit, category_id.
-- `GET /public/card-order/banks?show_in=over_limit` — public list for over-limit banner.
+### 3) Payment Request Message Format
+- New format:
+  ```
+  إجمالي المديونية: 13,250
+  المبلغ المطلوب سداده: 5,000
 
-## Admin Endpoints
-- `GET /customers/{id}/incentives`, `POST /customers/{id}/incentives/redeem`.
-- `GET /reports/incentives?start&end&customer_id&category_id&status_filter`.
-- `bank_accounts` CRUD with show_in flags (`invoices`, `receipts`, `payment_requests`, `over_limit`).
+  بيانات السداد:
+
+  Al-Amal Bank
+  اسم الحساب: Jawad Net
+  رقم الحساب: 9876543
+  IBAN test
+
+  شبكة جواد نت اللاسلكية
+  ```
+- Bank name displayed WITHOUT "البنك:" prefix as requested.
+- Debt total + requested amount included automatically.
+- Multiple banks appended cleanly.
+
+## Route Bug Fixed
+- Removed stray `@api.get("/reports/incentives")` decorator that was stacked on top of `public_banks`, causing `/api/reports/incentives` to return the bank-accounts list.
+- Restored `incentive_report` function definition properly.
 
 ## Auth
-- Admins exempt from device-binding. Customers device-bound (5 failed = block).
-- Login → /dashboard. Logout & 401 → /mof30.
+- Admins exempt from device-binding. Login → /dashboard.
+- Customers device-bound (5 failed = block).
 
 ## Credentials
 - MOFEED / EeFSWtdsFRBmb3p (18 permissions)
-- admin / admin123, MOF / admin123
 
 ## Backlog
 - P1: Refactor server.py (>3900 lines) into modular routers.
 - P2: Biometric (WebAuthn/Passkeys) login.
-- P2: Admin "حوافز" icon inside customers list row to redeem on behalf.
-- P2: MongoDB Atlas migration.

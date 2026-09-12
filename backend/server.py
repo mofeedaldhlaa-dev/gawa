@@ -1364,7 +1364,6 @@ async def public_redeem_incentive(data: IncentiveRedeemIn):
     c = await _verify_public_customer(data.phone, data.password)
     return await _redeem_incentive(c, data.category_id, data.mode, data.qty, None)
 
-@api.get("/reports/incentives")
 # Public banks (safe subset for card-order screen)
 @api.get("/public/card-order/banks")
 async def public_banks(show_in: str = "over_limit"):
@@ -1429,6 +1428,62 @@ async def update_incentive_rule(rid: str, data: IncentiveRuleIn, user=Depends(re
 async def delete_incentive_rule(rid: str, user=Depends(require_perm("settings"))):
     await db.incentive_rules.delete_one({"id": rid})
     return {"ok": True}
+
+
+@api.get("/reports/incentives")
+async def incentive_report(start: Optional[str] = None, end: Optional[str] = None,
+                            customer_id: Optional[str] = None, category_id: Optional[str] = None,
+                            status_filter: Optional[str] = None, kind: Optional[str] = "redeemed",
+                            user=Depends(require_perm("reports"))):
+    """kind = redeemed | pending"""
+    if kind == "pending":
+        customers = await db.customers.find({"status": {"$ne": "disabled"}}).to_list(5000)
+        if customer_id:
+            customers = [c for c in customers if c.get("id") == customer_id]
+        rows = []
+        total_qty = 0
+        total_value = 0.0
+        for c in customers:
+            summary = await _customer_incentive_summary(c)
+            for row in summary.get("categories", []):
+                if row.get("pending_qty", 0) <= 0: continue
+                if category_id and row.get("category_id") != category_id: continue
+                rec = {
+                    "id": f"{c.get('id')}::{row.get('category_id')}",
+                    "customer_id": c.get("id"),
+                    "customer_name": c.get("name", ""),
+                    "customer_type": c.get("customer_type", "customer"),
+                    "category_id": row.get("category_id"),
+                    "category_name": row.get("category_name"),
+                    "qty": row.get("pending_qty"),
+                    "bought": row.get("bought"),
+                    "buy_qty": row.get("buy_qty"),
+                    "reward_qty": row.get("reward_qty"),
+                    "unit_value": row.get("unit_value"),
+                    "redeemed_value": float(row.get("unit_value") or 0) * int(row.get("pending_qty") or 0),
+                    "status": "pending",
+                    "status_text": row.get("status_text"),
+                    "redeemed_by": None,
+                    "redeemed_at": None,
+                }
+                rows.append(rec)
+                total_qty += int(row.get("pending_qty") or 0)
+                total_value += rec["redeemed_value"]
+        return {"items": rows, "total_qty": total_qty, "total_value": total_value, "count": len(rows), "kind": "pending"}
+
+    q: Dict[str, Any] = {"status": {"$in": ["redeemed_card", "redeemed_credit"]}}
+    if customer_id: q["customer_id"] = customer_id
+    if category_id: q["category_id"] = category_id
+    if status_filter: q["status"] = status_filter
+    if start or end:
+        rng: Dict[str, Any] = {}
+        if start: rng["$gte"] = f"{start}T00:00:00+03:00"
+        if end: rng["$lte"] = f"{end}T23:59:59+03:00"
+        q["redeemed_at"] = rng
+    items = await db.incentive_earnings.find(q).sort("redeemed_at", -1).limit(5000).to_list(5000)
+    total_qty = sum(int(x.get("qty") or 0) for x in items)
+    total_value = sum(float(x.get("redeemed_value") or (x.get("unit_value") or 0) * (x.get("qty") or 0)) for x in items)
+    return {"items": [clean_doc(x) for x in items], "total_qty": total_qty, "total_value": total_value, "count": len(items), "kind": "redeemed"}
 
 
 @api.post("/sales")
@@ -2712,22 +2767,30 @@ async def create_payment_request(data: PaymentRequestIn, user=Depends(require_pe
         "amount": float(data.amount),
         "method": data.method or "sms",
         "message": (data.message or "").strip(),
-        "status": "sent",  # new / sent / paid / cancelled
+        "status": "sent",
         "user_id": user["id"], "username": user.get("username"),
         "idempotency_key": data.idempotency_key,
         "created_at": now_iso(),
     }
-    # Auto-append bank accounts flagged for payment_requests
+    # Compose message: user's note (if any) + debt + payment request + bank blocks
+    balance = float(party.get("balance", 0) or 0)
+    header = doc["message"] or ""
+    body_parts = []
+    body_parts.append(f"إجمالي المديونية: {balance:,.0f}")
+    body_parts.append(f"المبلغ المطلوب سداده: {float(data.amount):,.0f}")
     banks = await db.bank_accounts.find({"active": True, "show_in": "payment_requests"}).to_list(50)
     if banks:
-        lines = []
+        body_parts.append("")
+        body_parts.append("بيانات السداد:")
         for b in banks:
-            block = f"\n\nالبنك: {b.get('bank_name','')}"
-            block += f"\nاسم الحساب: {b.get('holder_name','')}"
-            block += f"\nرقم الحساب: {b.get('account_number','')}"
-            if b.get("details"): block += f"\nالتفاصيل: {b.get('details')}"
-            lines.append(block)
-        doc["message"] = (doc["message"] + "\n\nبيانات السداد:" + "".join(lines)).strip()
+            body_parts.append("")
+            body_parts.append(f"{b.get('bank_name','')}")
+            body_parts.append(f"اسم الحساب: {b.get('holder_name','')}")
+            body_parts.append(f"رقم الحساب: {b.get('account_number','')}")
+            if b.get("details"): body_parts.append(f"{b.get('details')}")
+    body_parts.append("")
+    body_parts.append("شبكة جواد نت اللاسلكية")
+    doc["message"] = ((header + "\n\n") if header else "") + "\n".join(body_parts)
     await db.payment_requests.insert_one(doc)
     await audit_log(user, "create", "payment_request", doc["id"], None, {"amount": data.amount})
     return clean_doc(doc)
