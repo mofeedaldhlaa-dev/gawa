@@ -220,9 +220,9 @@ function AppRoutes() {
       <Route path="/login" element={<Login />} />
       <Route path="/mof" element={<Login />} />
       <Route path="/mof30" element={<Login />} />
-      <Route path="/order-card" element={<Navigate to="/mof30" replace />} />
-      <Route path="/order" element={<Navigate to="/mof30" replace />} />
-      <Route path="/" element={<Navigate to="/mof30" replace />} />
+      <Route path="/order-card" element={<PublicOrder />} />
+      <Route path="/order" element={<PublicOrder />} />
+      <Route path="/" element={<PublicOrder />} />
       <Route path="/dashboard" element={<Guard perm="dashboard"><Dashboard /></Guard>} />
       <Route path="/sales" element={<Guard perm="sales"><Sales /></Guard>} />
       <Route path="/sales/new" element={<Guard perm="sales"><SaleForm /></Guard>} />
@@ -248,7 +248,7 @@ function AppRoutes() {
       <Route path="/blocked" element={<Guard perm="customers"><BlockedCustomers /></Guard>} />
       <Route path="/settings" element={<Guard perm="settings"><SettingsPage /></Guard>} />
       <Route path="/files" element={<Guard perm="dashboard"><Files /></Guard>} />
-      <Route path="*" element={<Navigate to="/mof30" replace />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }
