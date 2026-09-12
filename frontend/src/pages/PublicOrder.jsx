@@ -451,19 +451,17 @@ export default function PublicOrder() {
                 >
                   <FileText size={14} className="ml-1"/> كشف الحساب
                 </Button>
-                {incentives.enabled && (
-                  <Button
-                    type="button"
-                    onClick={() => setShowIncentives(true)}
-                    variant="outline"
-                    size="sm"
-                    className="border-amber-500 text-amber-700 hover:bg-amber-50 relative"
-                    data-testid="po-open-incentives"
-                  >
-                    <Gift size={14} className="ml-1"/> حوافز
-                    {incentives.categories.some((c) => c.pending_qty > 0) && <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[9px] rounded-full h-4 w-4 flex items-center justify-center font-bold">!</span>}
-                  </Button>
-                )}
+                <Button
+                  type="button"
+                  onClick={() => setShowIncentives(true)}
+                  variant="outline"
+                  size="sm"
+                  className={`relative ${(incentives.enabled || incentives.history?.length) ? "border-amber-500 text-amber-700 hover:bg-amber-50" : "border-slate-300 text-slate-500 hover:bg-slate-50"}`}
+                  data-testid="po-open-incentives"
+                >
+                  <Gift size={14} className="ml-1"/> حوافز
+                  {(incentives.categories || []).some((c) => c.pending_qty > 0) && <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[9px] rounded-full h-4 w-4 flex items-center justify-center font-bold">!</span>}
+                </Button>
               </div>
             </Card>
             {orderError && (

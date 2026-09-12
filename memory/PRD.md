@@ -6,51 +6,39 @@ Arabic (RTL) full-stack ERP for شبكة جواد نت اللاسلكية.
 ## Routing
 - `/` → PublicOrder (customer card window). Only entry for customers.
 - `/mof30` → ONLY entry for Admin/Users login.
-- `/login`, `/mof`, unknown → redirect to `/`.
 
-## Cumulative Incentive System (2026-02, iter 12)
-- Pending earnings are **computed dynamically** on read from the sum of all active sales quantities per (customer, category). No per-sale insert.
-- Rules per category, per account_type (customer / pos), independent.
-- Cumulative: multiple invoices, multiple days, cash + credit + electronic — all counted together.
-- Remainder carries forward across cycles: bought=23 with buy=10/reward=1 → earned 2, remaining 3 for next.
-- Categories tracked independently — no cross-category mixing.
-- `exclude_special_price` toggle skips accounts with `special_prices_enabled=true`.
-- Sale edit/delete automatically recomputes because logic reads from live sales.
-- Redemption creates a permanent `incentive_earnings` history record (`redeemed_card` or `redeemed_credit`) — never re-runnable.
-- History preserved forever even after new redemption cycles start.
+## Latest Fixes (2026-02, iter 13)
+- **Incentives button now ALWAYS visible** in PublicOrder data card (styled amber when enabled/history, muted otherwise).
+- **Incentives Report Tab** added to `/reports` with daily/monthly/yearly/custom filters, print support, `data-testid="rep-incentives"`, `inc-table`, `inc-period-day|month|year|custom`.
+- **Payment request auto-injects banks** — frontend now uses `r.data.message` returned by the backend which already contains the "بيانات السداد" block with all banks tagged `payment_requests`. Verified: `message includes bank: True`.
 
-## Incentive UI
-- PublicOrder data card has a **🎁 حوافز** button with red badge if pending > 0.
-- Modal shows per-category rows: `bought / redeemed / pending`, rule text, Arabic status string, and two buttons on pending rows: "استلام كرت الحافز" / "تقييد المبلغ في حسابي". History list at bottom.
-- Alert banner at top when pending exist.
+## Cumulative Incentive System
+- Pending earnings computed dynamically per (customer, category) from all active sales.
+- Multiple invoices, multiple days, cash+credit+electronic — all counted together.
+- Remainder carries forward. Categories independent.
+- Redemption creates permanent history in `incentive_earnings`.
+- `exclude_special_price` skips accounts with `special_prices_enabled=true`.
 
-## Incentive Report
-- `GET /api/reports/incentives?start&end&customer_id&category_id&status_filter` returns `{items, count, total_qty, total_value}`.
-- Redemption history only (redeemed_card / redeemed_credit).
-- Yemen +03:00 boundaries.
+## Public Endpoints
+- `POST /public/card-order/incentives` — dynamic summary + history for logged-in customer.
+- `POST /public/card-order/incentives/redeem` — mode: card|credit, category_id.
+- `GET /public/card-order/banks?show_in=over_limit` — public list for over-limit banner.
 
-## Bank Accounts in Public
-- `GET /api/public/card-order/banks?show_in=over_limit` — public (no auth).
-- PublicOrder over-limit error banner auto-shows those banks with bank_name / holder / account / details.
-- `POST /api/payment-requests` auto-appends "بيانات السداد" block for every active bank with `show_in=payment_requests`.
-
-## Delivered Earlier
-- Statement cleanup (no تعديل/حذف noise in ledger).
-- Bank Accounts CRUD + admin page + invoice/receipt print integration.
-- Special Prices per customer/POS.
-- Login redirects, PWA (manifest + service worker + icons).
+## Admin Endpoints
+- `GET /customers/{id}/incentives`, `POST /customers/{id}/incentives/redeem`.
+- `GET /reports/incentives?start&end&customer_id&category_id&status_filter`.
+- `bank_accounts` CRUD with show_in flags (`invoices`, `receipts`, `payment_requests`, `over_limit`).
 
 ## Auth
-- Admins exempt from device-binding. Login → /dashboard. Logout & 401 → /mof30.
-- Customers device-bound (5 failed = block).
+- Admins exempt from device-binding. Customers device-bound (5 failed = block).
+- Login → /dashboard. Logout & 401 → /mof30.
 
 ## Credentials
 - MOFEED / EeFSWtdsFRBmb3p (18 permissions)
 - admin / admin123, MOF / admin123
-- Per-deploy admin auto-created.
 
 ## Backlog
 - P1: Refactor server.py (>3900 lines) into modular routers.
 - P2: Biometric (WebAuthn/Passkeys) login.
-- P2: Incentive report UI page (backend endpoint is ready).
+- P2: Admin "حوافز" icon inside customers list row to redeem on behalf.
 - P2: MongoDB Atlas migration.

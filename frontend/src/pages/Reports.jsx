@@ -15,6 +15,7 @@ const TAB_TITLES = {
   electronic: "تقرير المبيعات الإلكترونية", card_order_log: "سجل طلبات الرابط",
   customer_debts: "تقرير مديونية العملاء", supplier_debts: "تقرير مديونية الموردين",
   stock: "تقرير المخزون", opening: "تقرير الأرصدة الافتتاحية", movement: "تقرير حركة صنف بالمخزون",
+  incentives: "تقرير الحوافز",
 };
 
 const _iso = (d) => d.toISOString().slice(0, 10);
@@ -38,6 +39,11 @@ export default function Reports() {
   const [mvStart, setMvStart] = useState(_iso(_startOfMonth()));
   const [mvEnd, setMvEnd] = useState(_iso(new Date()));
   const [mvData, setMvData] = useState(null);
+  // incentives report
+  const [incPeriod, setIncPeriod] = useState("month");
+  const [incStart, setIncStart] = useState(_iso(_startOfMonth()));
+  const [incEnd, setIncEnd] = useState(_iso(new Date()));
+  const [incData, setIncData] = useState({ items: [], count: 0, total_qty: 0, total_value: 0 });
 
   useEffect(() => { api.get("/categories").then((r) => setCategories(r.data)).catch(() => {}); }, []);
 
@@ -50,6 +56,7 @@ export default function Reports() {
       opening: "/reports/opening-balances",
     };
     if (tab === "movement") return;
+    if (tab === "incentives") return;
     if (!endpoints[tab]) return;
     const params = ["sales","purchases"].includes(tab) && start && end ? { start, end } : {};
     try {
@@ -66,6 +73,21 @@ export default function Reports() {
       setMvData(r.data);
     } catch (e) { toast.error(errText(e)); setMvData(null); }
   };
+
+  const applyIncentivePeriod = (mode) => {
+    const today = new Date();
+    if (mode === "day") { setIncStart(_iso(today)); setIncEnd(_iso(today)); }
+    else if (mode === "month") { setIncStart(_iso(_startOfMonth())); setIncEnd(_iso(today)); }
+    else if (mode === "year") { setIncStart(_iso(_startOfYear())); setIncEnd(_iso(today)); }
+    setIncPeriod(mode);
+  };
+  const loadIncentives = async () => {
+    try {
+      const r = await api.get("/reports/incentives", { params: { start: incStart, end: incEnd } });
+      setIncData(r.data);
+    } catch (e) { toast.error(errText(e)); setIncData({ items: [], count: 0, total_qty: 0, total_value: 0 }); }
+  };
+  useEffect(() => { if (tab === "incentives") loadIncentives(); /* eslint-disable-next-line */ }, [tab]);
 
   const orderLogFiltered = useMemo(() => {
     if (tab !== "card_order_log") return [];
@@ -164,6 +186,27 @@ export default function Reports() {
         ],
         username,
       });
+    } else if (tab === "incentives") {
+      printReport({
+        title: `${title} — من ${incStart} إلى ${incEnd}`,
+        headers: ["التاريخ", "العميل", "النوع", "الفئة", "الكمية", "طريقة الاستفادة", "المبلغ", "المستخدم"],
+        rows: incData.items.map((r) => [
+          fmtDate(r.redeemed_at || r.created_at),
+          r.customer_name || "-",
+          r.customer_type === "pos" ? "نقطة بيع" : "عميل",
+          r.category_name || "-",
+          r.qty,
+          r.status === "redeemed_credit" ? "تقييد المبلغ في الحساب" : "استلام كرت",
+          fmt(r.redeemed_value || (r.unit_value || 0) * (r.qty || 0)),
+          r.redeemed_by || "-",
+        ]),
+        totals: [
+          { label: "عدد العمليات", value: incData.count },
+          { label: "إجمالي الكمية", value: incData.total_qty },
+          { label: "إجمالي القيمة", value: fmt(incData.total_value) },
+        ],
+        username,
+      });
     }
   };
 
@@ -180,6 +223,7 @@ export default function Reports() {
           <TabsTrigger value="stock" data-testid="rep-stock">المخزون</TabsTrigger>
           <TabsTrigger value="opening" data-testid="rep-opening">الأرصدة الافتتاحية</TabsTrigger>
           <TabsTrigger value="movement" data-testid="rep-movement">حركة صنف</TabsTrigger>
+          <TabsTrigger value="incentives" data-testid="rep-incentives">الحوافز</TabsTrigger>
         </TabsList>
 
         <Card className="p-3 flex flex-col sm:flex-row gap-2 sm:items-end flex-wrap mt-3 no-print">
@@ -224,6 +268,21 @@ export default function Reports() {
               <Button onClick={loadMovement} className="bg-[#221340] w-full sm:w-auto" data-testid="mv-load">عرض الحركة</Button>
             </>
           )}
+          {tab === "incentives" && (
+            <>
+              <div className="w-full">
+                <label className="text-xs">الفترة</label>
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {[["day","يومي"],["month","شهري"],["year","سنوي"],["custom","مخصص"]].map(([k,l]) => (
+                    <button key={k} onClick={() => applyIncentivePeriod(k)} className={`px-2 py-1 rounded-full text-xs border ${incPeriod===k?"bg-[#452480] text-white border-[#452480]":"border-slate-300"}`} data-testid={`inc-period-${k}`}>{l}</button>
+                  ))}
+                </div>
+              </div>
+              <div><label className="text-xs">من</label><Input type="date" value={incStart} onChange={(e) => { setIncStart(e.target.value); setIncPeriod("custom"); }} data-testid="inc-start"/></div>
+              <div><label className="text-xs">إلى</label><Input type="date" value={incEnd} onChange={(e) => { setIncEnd(e.target.value); setIncPeriod("custom"); }} data-testid="inc-end"/></div>
+              <Button onClick={loadIncentives} className="bg-[#221340] w-full sm:w-auto" data-testid="inc-load">عرض</Button>
+            </>
+          )}
           {tab !== "movement" && <Input placeholder="بحث..." value={q} onChange={(e) => setQ(e.target.value)} className="w-full sm:max-w-xs"/>}
           <Button onClick={printCurrent} variant="outline" data-testid="print-report" className="w-full sm:w-auto"><Printer size={14} className="ml-1"/> طباعة / PDF</Button>
         </Card>
@@ -246,10 +305,47 @@ export default function Reports() {
         <TabsContent value="stock"><StockTable data={filtered}/></TabsContent>
         <TabsContent value="opening"><OpeningTable data={filtered}/></TabsContent>
         <TabsContent value="movement"><MovementTable data={mvData}/></TabsContent>
+        <TabsContent value="incentives"><IncentivesTable data={incData} query={q}/></TabsContent>
       </Tabs>
     </div>
   );
 }
+
+const IncentivesTable = ({ data, query }) => {
+  const items = (data?.items || []).filter((r) => !query || JSON.stringify(r).toLowerCase().includes(query.toLowerCase()));
+  return (
+    <Card className="mt-3 overflow-x-auto" data-testid="inc-table">
+      <table className="w-full text-sm">
+        <thead className="bg-slate-50"><tr className="text-right"><th className="p-2">التاريخ</th><th className="p-2">العميل</th><th className="p-2">النوع</th><th className="p-2">الفئة</th><th className="p-2">الكمية</th><th className="p-2">طريقة الاستفادة</th><th className="p-2">المبلغ</th><th className="p-2">المستخدم</th></tr></thead>
+        <tbody>
+          {items.map((r) => (
+            <tr key={r.id} className="border-t">
+              <td className="p-2">{fmtDate(r.redeemed_at || r.created_at)}</td>
+              <td className="p-2">{r.customer_name || "-"}</td>
+              <td className="p-2">{r.customer_type === "pos" ? "نقطة بيع" : "عميل"}</td>
+              <td className="p-2">{r.category_name || "-"}</td>
+              <td className="p-2 num">{r.qty}</td>
+              <td className="p-2 text-xs">{r.status === "redeemed_credit" ? "تقييد في الحساب" : "استلام كرت"}</td>
+              <td className="p-2 num">{fmt(r.redeemed_value || (r.unit_value || 0) * (r.qty || 0))}</td>
+              <td className="p-2 text-xs">{r.redeemed_by || "-"}</td>
+            </tr>
+          ))}
+          {items.length === 0 && <tr><td colSpan={8} className="p-6 text-center text-slate-400">لا توجد حوافز مصروفة في الفترة المحددة</td></tr>}
+        </tbody>
+        <tfoot>
+          <tr className="bg-slate-100 font-bold">
+            <td colSpan={4} className="p-2">الإجمالي: {items.length} عملية</td>
+            <td className="p-2 num">{(data?.total_qty) || 0}</td>
+            <td></td>
+            <td className="p-2 num">{fmt(data?.total_value || 0)}</td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
+    </Card>
+  );
+};
+
 
 const ReportTable = ({ data, kind }) => {
   const total = data.reduce((s, x) => s + (x.total || 0), 0);

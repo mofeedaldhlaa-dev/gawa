@@ -107,8 +107,8 @@ export default function AccountDetail() {
       });
       const p = r.data;
       const phone = acc.phone || "";
-      const dueLabel = acc.balance >= 0 ? "لكم" : "علينا";
-      const body = req.message?.trim() || `طلب تسديد بمبلغ ${p.amount} — الرصيد المستحق (${dueLabel}): ${fmt(Math.abs(acc.balance || 0))} — شبكة جواد نت اللاسلكية`;
+      // Use server-provided message (auto-includes bank accounts flagged for payment_requests)
+      const body = p.message || req.message?.trim() || `طلب تسديد بمبلغ ${p.amount} — شبكة جواد نت اللاسلكية`;
       if (req.method === "whatsapp" && phone) {
         const wa = `https://wa.me/${phone.replace(/^0/, "967")}?text=${encodeURIComponent(body)}`;
         window.open(wa, "_blank");
