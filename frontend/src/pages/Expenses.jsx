@@ -98,7 +98,7 @@ export default function Expenses() {
   };
 
   const deleteExpense = async (id) => {
-    if (!window.confirm("حذف المصروف؟")) return;
+    if (!window.confirm("هل أنت متأكد من حذف هذا العنصر؟ لا يمكن التراجع عن عملية الحذف.")) return;
     try {
       await api.delete(`/expenses/${id}`);
       toast.success("تم الحذف"); load();

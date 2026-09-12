@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/auth";
 import { useNavigate, Link } from "react-router-dom";
 import { Card } from "@/components/ui/card";
@@ -13,7 +13,7 @@ export default function Login() {
   const [password, setP] = useState("");
   const [loading, setLoading] = useState(false);
 
-  if (user) nav("/dashboard");
+  useEffect(() => { if (user) nav("/dashboard"); }, [user, nav]);
 
   const submit = async (e) => {
     e.preventDefault();

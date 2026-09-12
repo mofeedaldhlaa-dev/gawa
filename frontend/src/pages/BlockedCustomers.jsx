@@ -15,8 +15,9 @@ export default function BlockedCustomers() {
   useEffect(() => { load(); }, []);
   const unblock = async (phone) => {
     try {
-      await api.post(`/public-blocks/${phone}/unblock`);
+      const r = await api.post(`/public-blocks/${phone}/unblock`);
       toast.success("تم رفع الحظر");
+      if (r.data?.whatsapp_url) window.open(r.data.whatsapp_url, "_blank");
       load();
     } catch (e) { toast.error(errText(e)); }
   };

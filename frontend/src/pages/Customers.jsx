@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { fmt } from "@/lib/utils";
 import { Link } from "react-router-dom";
-import { Search, Plus, FileText, Edit, KeyRound, Eye, Power, PowerOff } from "lucide-react";
+import { Search, Plus, FileText, Edit, KeyRound, Eye, Power, PowerOff, Trash2 } from "lucide-react";
 
 function CustomerForm({ initial, onSaved, onClose }) {
   const [f, setF] = useState(initial || { name: "", phone: "", password: "", credit_limit: 0, opening_balance: 0, address: "", notes: "", status: "active", customer_type: "customer" });
@@ -59,8 +59,9 @@ function PasswordDialog({ customer, onClose, onSaved }) {
     if (pwd !== confirm) { toast.error("كلمة المرور وتأكيدها غير متطابقين"); return; }
     if (pwd.length < 4) { toast.error("كلمة المرور قصيرة"); return; }
     try {
-      await api.post(`/customers/${customer.id}/password`, { password: pwd });
+      const r = await api.post(`/customers/${customer.id}/password`, { password: pwd });
       toast.success("تم تغيير كلمة المرور");
+      if (r.data?.whatsapp_url) window.open(r.data.whatsapp_url, "_blank");
       onSaved(); onClose();
     } catch (e) { toast.error(errText(e)); }
   };
@@ -68,8 +69,9 @@ function PasswordDialog({ customer, onClose, onSaved }) {
     if (!window.confirm(`إلغاء ربط الجهاز الحالي عن ${customer.name}؟\nسيتمكن العميل من تسجيل الدخول من جهاز جديد وسيُربط تلقائياً.`)) return;
     setUnbinding(true);
     try {
-      await api.post(`/customers/${customer.id}/unbind-device`);
+      const r = await api.post(`/customers/${customer.id}/unbind-device`);
       toast.success("تم إلغاء ربط الجهاز. يمكن للعميل الآن تسجيل الدخول من جهاز جديد.");
+      if (r.data?.whatsapp_url) window.open(r.data.whatsapp_url, "_blank");
       onSaved();
     } catch (e) { toast.error(errText(e)); }
     setUnbinding(false);
@@ -155,6 +157,15 @@ export default function Customers() {
     } catch (e) { toast.error(errText(e)); }
   };
 
+  const removeCustomer = async (c) => {
+    if (!window.confirm("هل أنت متأكد من حذف هذا العنصر؟ لا يمكن التراجع عن عملية الحذف.")) return;
+    try {
+      await api.delete(`/customers/${c.id}`);
+      toast.success(`تم حذف العميل: ${c.name}`);
+      load();
+    } catch (e) { toast.error(errText(e)); }
+  };
+
   const filtered = items.filter((c) => (!q || c.name.includes(q) || (c.phone || "").includes(q)) && (typeFilter === "all" || (c.customer_type || "customer") === typeFilter));
 
   return (
@@ -210,6 +221,7 @@ export default function Customers() {
                     <Button size="sm" variant="outline" onClick={() => { setEdit(c); setOpen(true); }} data-testid={`cust-edit-${c.id}`}><Edit size={14} /></Button>
                     <Button size="sm" variant="outline" onClick={() => setPwdCustomer(c)} data-testid={`cust-pwd-${c.id}`}><KeyRound size={14} /></Button>
                     <Button size="sm" variant="outline" onClick={() => toggleStatus(c)} data-testid={`cust-toggle-${c.id}`} title={c.status==='active'?'تعطيل':'تفعيل'}>{c.status==='active' ? <PowerOff size={14} className="text-red-600"/> : <Power size={14} className="text-green-600"/>}</Button>
+                    <Button size="sm" variant="outline" onClick={() => removeCustomer(c)} data-testid={`cust-delete-${c.id}`} title="حذف" className="border-red-300"><Trash2 size={14} className="text-red-600"/></Button>
                   </td>
                 </tr>
               ))}
@@ -230,6 +242,7 @@ export default function Customers() {
                   <Button size="sm" variant="outline" onClick={() => { setEdit(c); setOpen(true); }}><Edit size={14} /></Button>
                   <Button size="sm" variant="outline" onClick={() => setPwdCustomer(c)}><KeyRound size={14} /></Button>
                   <Button size="sm" variant="outline" onClick={() => toggleStatus(c)} data-testid={`cust-toggle-m-${c.id}`}>{c.status==='active' ? <PowerOff size={14} className="text-red-600"/> : <Power size={14} className="text-green-600"/>}</Button>
+                  <Button size="sm" variant="outline" onClick={() => removeCustomer(c)} data-testid={`cust-delete-m-${c.id}`} className="border-red-300"><Trash2 size={14} className="text-red-600"/></Button>
                 </div>
               </div>
               <div className="grid grid-cols-3 gap-2 mt-2 text-xs">

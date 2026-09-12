@@ -666,8 +666,25 @@ async def update_customer(cid: str, data: CustomerIn, user=Depends(require_perm(
     return clean_doc(doc)
 
 @api.delete("/customers/{cid}")
-async def disable_customer(cid: str, user=Depends(require_perm("customers"))):
-    await db.customers.update_one({"id": cid}, {"$set": {"status": "disabled"}})
+async def delete_customer(cid: str, user=Depends(require_perm("delete_ops"))):
+    """Hard-delete a customer safely.
+    Refuses if the customer has any financial history (sales/receipts/ledger).
+    Cleans the opening-balance ledger entry then removes the customer document."""
+    doc = await db.customers.find_one({"id": cid})
+    if not doc:
+        raise HTTPException(status_code=404, detail="العميل غير موجود")
+    sales_count = await db.sales.count_documents({"customer_id": cid})
+    recs_count = await db.receipts.count_documents({"party_type": "customer", "party_id": cid})
+    ledger_count = await db.ledger.count_documents({"party_type": "customer", "party_id": cid, "description": {"$ne": "رصيد افتتاحي"}})
+    orders_count = await db.orders.count_documents({"customer_id": cid})
+    if sales_count or recs_count or ledger_count or orders_count or float(doc.get("balance", 0) or 0) != 0:
+        raise HTTPException(
+            status_code=400,
+            detail="لا يمكن حذف هذا العميل لوجود عمليات مالية مرتبطة (فواتير/سندات/رصيد). يمكنك تعطيل الحساب بدلاً من الحذف."
+        )
+    await db.ledger.delete_many({"party_type": "customer", "party_id": cid})
+    await db.customers.delete_one({"id": cid})
+    await audit_log(user, f"حذف العميل: {doc.get('name','')}", "customer", cid, {"name": doc.get("name"), "phone": doc.get("phone")}, None)
     return {"ok": True}
 
 @api.post("/customers/{cid}/toggle-status")
@@ -720,8 +737,23 @@ async def update_supplier(sid: str, data: SupplierIn, user=Depends(require_perm(
     return clean_doc(doc)
 
 @api.delete("/suppliers/{sid}")
-async def disable_supplier(sid: str, user=Depends(require_perm("suppliers"))):
-    await db.suppliers.update_one({"id": sid}, {"$set": {"status": "disabled"}})
+async def delete_supplier(sid: str, user=Depends(require_perm("delete_ops"))):
+    """Hard-delete a supplier safely.
+    Refuses if the supplier has any financial history (purchases/receipts/ledger)."""
+    doc = await db.suppliers.find_one({"id": sid})
+    if not doc:
+        raise HTTPException(status_code=404, detail="المورد غير موجود")
+    purch_count = await db.purchases.count_documents({"supplier_id": sid})
+    recs_count = await db.receipts.count_documents({"party_type": "supplier", "party_id": sid})
+    ledger_count = await db.ledger.count_documents({"party_type": "supplier", "party_id": sid, "description": {"$ne": "رصيد افتتاحي"}})
+    if purch_count or recs_count or ledger_count or float(doc.get("balance", 0) or 0) != 0:
+        raise HTTPException(
+            status_code=400,
+            detail="لا يمكن حذف هذا المورد لوجود عمليات مالية مرتبطة (فواتير/سندات/رصيد). يمكنك تعطيل الحساب بدلاً من الحذف."
+        )
+    await db.ledger.delete_many({"party_type": "supplier", "party_id": sid})
+    await db.suppliers.delete_one({"id": sid})
+    await audit_log(user, f"حذف المورد: {doc.get('name','')}", "supplier", sid, {"name": doc.get("name"), "phone": doc.get("phone")}, None)
     return {"ok": True}
 
 @api.get("/suppliers/{sid}/statement")
@@ -1239,7 +1271,7 @@ async def delete_sale(sid: str, user=Depends(require_perm("delete_ops"))):
         # 2) reverse inventory (put cards back to available; refund quantity stock)
         await _reverse_sale_inventory(doc.get("items", []))
     await db.sales.delete_one({"id": sid})
-    await audit_log(user, "delete", "sale", sid, {"number": doc.get("number"), "total": doc.get("total")}, None)
+    await audit_log(user, f"حذف فاتورة مبيعات {doc.get('number','')}", "sale", sid, {"number": doc.get("number"), "total": doc.get("total")}, None)
     return {"ok": True}
 
 @api.delete("/purchases/{pid}")
@@ -1258,7 +1290,7 @@ async def delete_purchase(pid: str, user=Depends(require_perm("delete_ops"))):
             elif it.get("quantity"):
                 await db.stock.update_one({"category_id": it["category_id"]}, {"$inc": {"total": -it["quantity"]}})
     await db.purchases.delete_one({"id": pid})
-    await audit_log(user, "delete", "purchase", pid, {"number": doc.get("number"), "total": doc.get("total")}, None)
+    await audit_log(user, f"حذف فاتورة مشتريات {doc.get('number','')}", "purchase", pid, {"number": doc.get("number"), "total": doc.get("total")}, None)
     return {"ok": True}
 
 @api.delete("/receipts/{rid}")
@@ -1274,8 +1306,9 @@ async def delete_receipt(rid: str, user=Depends(require_perm("delete_ops"))):
         if pty in ("customer","supplier") and pid and amt:
             sign = +1 if doc.get("kind") == "receipt" else -1  # receipt reduced balance → add back
             await _adjust_party_balance(pty, pid, sign * amt, doc.get("number",""), f"حذف {'قبض' if doc.get('kind')=='receipt' else 'صرف'} {doc.get('number','')}")
+    kind_ar = "قبض" if doc.get("kind") == "receipt" else "صرف"
     await db.receipts.delete_one({"id": rid})
-    await audit_log(user, "delete", "receipt", rid, {"number": doc.get("number"), "amount": doc.get("amount"), "kind": doc.get("kind")}, None)
+    await audit_log(user, f"حذف سند {kind_ar} {doc.get('number','')}", "receipt", rid, {"number": doc.get("number"), "amount": doc.get("amount"), "kind": doc.get("kind")}, None)
     return {"ok": True}
 
 
@@ -1782,7 +1815,7 @@ async def delete_expense(eid: str, user=Depends(require_perm("delete_ops"))):
     if not doc:
         raise HTTPException(status_code=404, detail="غير موجود")
     await db.expenses.update_one({"id": eid}, {"$set": {"status": "deleted", "deleted_at": now_iso(), "deleted_by": user.get("username")}})
-    await audit_log(user, "delete", "expense", eid)
+    await audit_log(user, f"حذف مصروف {doc.get('number','')}", "expense", eid, {"number": doc.get("number"), "amount": doc.get("amount")}, None)
     return {"ok": True}
 
 
@@ -2918,8 +2951,21 @@ async def list_blocks(user=Depends(require_perm("customers"))):
 @api.post("/public-blocks/{phone}/unblock")
 async def unblock(phone: str, user=Depends(require_perm("customers"))):
     await db.public_blocks.update_one({"phone": phone}, {"$set": {"failed": 0, "blocked_until": None, "unblocked_at": now_iso(), "unblocked_by": user.get("username")}})
-    await audit_log(user, "unblock", "customer", phone)
-    return {"ok": True}
+    await audit_log(user, f"فك الحظر: {phone}", "customer", phone)
+    # WhatsApp URL
+    from urllib.parse import quote
+    cust = await db.customers.find_one({"phone": phone})
+    name = (cust or {}).get("name", "")
+    phone_digits = "".join(ch for ch in phone if ch.isdigit()).lstrip("0")
+    wa_phone = "967" + phone_digits if (phone_digits and not phone_digits.startswith("967")) else phone_digits
+    body = (
+        f"مرحباً {name} 👋\n\n"
+        f"تم فك الحظر عن حسابك في شبكة جواد نت اللاسلكية.\n\n"
+        f"📱 رقم الهاتف: {phone}\n\n"
+        f"يمكنك الآن تسجيل الدخول إلى حسابك."
+    )
+    wa_url = f"https://wa.me/{wa_phone}?text={quote(body)}" if wa_phone else ""
+    return {"ok": True, "whatsapp_url": wa_url}
 
 
 # ================= RESET DATA =================

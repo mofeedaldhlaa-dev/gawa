@@ -370,8 +370,8 @@ export default function PublicOrder() {
             <Card className="p-3 bg-slate-50">
               <div className="flex justify-between items-start">
                 <div>
-                  <div className="font-bold">{customer.name}</div>
-                  <div className="text-xs text-slate-500">{ctype === "pos" ? "نقطة بيع" : "عميل"}</div>
+                  <div className="text-xs text-slate-500">نوع الحساب</div>
+                  <div className="font-bold">{ctype === "pos" ? "نقطة بيع" : "عميل"}</div>
                 </div>
                 <button onClick={() => setShowChangePwd(true)} className="text-xs text-[#452480] hover:underline flex items-center gap-1" data-testid="po-change-pwd"><KeyRound size={12}/> تغيير كلمة المرور</button>
               </div>

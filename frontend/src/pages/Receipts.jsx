@@ -11,7 +11,7 @@ import { toast } from "sonner";
 import { fmt, fmtDate, genUUID, openWhatsApp, buildReceiptMessage } from "@/lib/utils";
 import { printReceipt } from "@/lib/print";
 import { useAuth } from "@/lib/auth";
-import { Plus, Printer, MessageCircle, X, Filter } from "lucide-react";
+import { Plus, Printer, MessageCircle, X, Filter, Trash2 } from "lucide-react";
 import { printReport } from "@/lib/print";
 import { useMemo } from "react";
 
@@ -91,6 +91,15 @@ export default function Receipts() {
     try {
       await api.put(`/receipts/${editing.id}`, { amount: Number(editing.amount), description: editing.description });
       toast.success("تم التعديل"); setEditing(null); load();
+    } catch (e) { toast.error(errText(e)); }
+  };
+
+  const removeReceipt = async (r) => {
+    if (!window.confirm("هل أنت متأكد من حذف هذا العنصر؟ لا يمكن التراجع عن عملية الحذف.")) return;
+    try {
+      await api.delete(`/receipts/${r.id}`);
+      toast.success(`تم حذف سند رقم ${r.number}`);
+      load();
     } catch (e) { toast.error(errText(e)); }
   };
 
@@ -235,6 +244,7 @@ export default function Receipts() {
                     <Button size="sm" variant="outline" onClick={() => setSaved({ ...r, party_phone: p?.phone })}><MessageCircle size={12}/></Button>
                     <Button size="sm" variant="outline" onClick={() => printReceipt({ receipt: r, party: p, username: user?.name || user?.username })} data-testid={`rec-print-${r.id}`}><Printer size={12}/></Button>
                     <Button size="sm" variant="outline" onClick={() => setEditing({ id: r.id, amount: r.amount, description: r.description || "" })} data-testid={`rec-edit-${r.id}`}>تعديل</Button>
+                    <Button size="sm" variant="outline" onClick={() => removeReceipt(r)} data-testid={`rec-delete-${r.id}`} className="border-red-300" title="حذف"><Trash2 size={12} className="text-red-600"/></Button>
                   </td>
                 </tr>
               );
@@ -265,6 +275,7 @@ export default function Receipts() {
                 <Button size="sm" variant="outline" onClick={() => setSaved({ ...r, party_phone: p?.phone })}><MessageCircle size={12} className="ml-1"/> واتساب</Button>
                 <Button size="sm" variant="outline" onClick={() => printReceipt({ receipt: r, party: p, username: user?.name || user?.username })}><Printer size={12} className="ml-1"/> طباعة</Button>
                 <Button size="sm" variant="outline" onClick={() => setEditing({ id: r.id, amount: r.amount, description: r.description || "" })}>تعديل</Button>
+                <Button size="sm" variant="outline" onClick={() => removeReceipt(r)} data-testid={`rec-delete-m-${r.id}`} className="border-red-300"><Trash2 size={12} className="ml-1 text-red-600"/> حذف</Button>
               </div>
             </Card>
           );

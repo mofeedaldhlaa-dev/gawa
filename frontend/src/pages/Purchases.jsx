@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Link } from "react-router-dom";
 import { fmt, fmtDate } from "@/lib/utils";
-import { Plus, Printer, Eye, Edit } from "lucide-react";
+import { Plus, Printer, Eye, Edit, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { printPurchase } from "@/lib/print";
 import { useAuth } from "@/lib/auth";
@@ -22,6 +22,16 @@ export default function Purchases() {
   const doPrint = (p) => {
     const supplier = suppliers.find((s) => s.id === p.supplier_id);
     printPurchase({ purchase: p, supplier, username: user?.name || user?.username });
+  };
+
+  const removePurchase = async (p) => {
+    if (!window.confirm("هل أنت متأكد من حذف هذا العنصر؟ لا يمكن التراجع عن عملية الحذف.")) return;
+    try {
+      await api.delete(`/purchases/${p.id}`);
+      toast.success(`تم حذف فاتورة مشتريات ${p.number}`);
+      setViewing(null);
+      load();
+    } catch (e) { toast.error(errText(e)); }
   };
 
   return (
@@ -43,6 +53,7 @@ export default function Purchases() {
                   <Button size="sm" variant="outline" onClick={() => setViewing(p)} data-testid={`purch-view-${p.id}`}><Eye size={12}/></Button>
                   <Link to={`/purchases/${p.id}/edit`}><Button size="sm" variant="outline" data-testid={`purch-edit-${p.id}`}><Edit size={12}/></Button></Link>
                   <Button size="sm" variant="outline" onClick={() => doPrint(p)} data-testid={`purch-print-${p.id}`}><Printer size={12}/></Button>
+                  <Button size="sm" variant="outline" onClick={() => removePurchase(p)} data-testid={`purch-delete-${p.id}`} className="border-red-300" title="حذف"><Trash2 size={12} className="text-red-600"/></Button>
                 </td>
               </tr>
             ))}
@@ -67,6 +78,7 @@ export default function Purchases() {
               <Button size="sm" variant="outline" onClick={() => setViewing(p)}><Eye size={12} className="ml-1"/> عرض</Button>
               <Link to={`/purchases/${p.id}/edit`}><Button size="sm" variant="outline"><Edit size={12} className="ml-1"/> تعديل</Button></Link>
               <Button size="sm" variant="outline" onClick={() => doPrint(p)}><Printer size={12} className="ml-1"/> طباعة</Button>
+              <Button size="sm" variant="outline" onClick={() => removePurchase(p)} data-testid={`purch-delete-m-${p.id}`} className="border-red-300"><Trash2 size={12} className="ml-1 text-red-600"/> حذف</Button>
             </div>
           </Card>
         ))}
@@ -94,6 +106,7 @@ export default function Purchases() {
               <div className="flex gap-2 mt-2 flex-wrap">
                 <Button onClick={() => doPrint(viewing)} className="bg-[#221340] flex-1 min-w-[120px]"><Printer size={14} className="ml-1"/> طباعة</Button>
                 <Link to={`/purchases/${viewing.id}/edit`} className="flex-1 min-w-[120px]"><Button variant="outline" className="w-full"><Edit size={14} className="ml-1"/> تعديل الفاتورة</Button></Link>
+                <Button onClick={() => removePurchase(viewing)} variant="outline" className="border-red-500 text-red-700 flex-1 min-w-[120px]" data-testid="purch-delete-view"><Trash2 size={14} className="ml-1"/> حذف الفاتورة</Button>
               </div>
             </div>
           )}
