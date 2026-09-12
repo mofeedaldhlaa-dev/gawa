@@ -44,13 +44,13 @@ function SpecialPricesEditor({ f, setF }) {
 }
 
 function CustomerForm({ initial, onSaved, onClose }) {
-  const [f, setF] = useState(initial || { name: "", phone: "", password: "", credit_limit: 0, opening_balance: 0, address: "", notes: "", status: "active", customer_type: "customer", special_prices_enabled: false, special_prices: [] });
+  const [f, setF] = useState(initial || { name: "", phone: "", password: "", credit_limit: 0, opening_balance: 0, address: "", notes: "", status: "active", customer_type: "customer", special_prices_enabled: false, special_prices: [], incentives_visible: true });
   const [loading, setLoading] = useState(false);
   const submit = async (e) => {
     e.preventDefault();
     setLoading(true);
     try {
-      const body = { ...f, credit_limit: Number(f.credit_limit) || 0, opening_balance: Number(f.opening_balance) || 0, special_prices_enabled: !!f.special_prices_enabled, special_prices: (f.special_prices || []).filter((r) => r.category_id && Number(r.price) > 0).map((r) => ({ category_id: r.category_id, price: Number(r.price) })) };
+      const body = { ...f, credit_limit: Number(f.credit_limit) || 0, opening_balance: Number(f.opening_balance) || 0, special_prices_enabled: !!f.special_prices_enabled, incentives_visible: f.incentives_visible !== false, special_prices: (f.special_prices || []).filter((r) => r.category_id && Number(r.price) > 0).map((r) => ({ category_id: r.category_id, price: Number(r.price) })) };
       if (initial?.id) await api.put(`/customers/${initial.id}`, body);
       else await api.post("/customers", body);
       toast.success("تم الحفظ بنجاح");
@@ -83,6 +83,17 @@ function CustomerForm({ initial, onSaved, onClose }) {
         {f.special_prices_enabled && <span className="text-[10px] bg-amber-500 text-white rounded-full px-2 py-0.5 mr-auto">مفعل</span>}
       </label>
       <SpecialPricesEditor f={f} setF={setF}/>
+      <div>
+        <Label>الحوافز</Label>
+        <Select value={f.incentives_visible === false ? "hide" : "show"} onValueChange={(v) => setF({ ...f, incentives_visible: v === "show" })}>
+          <SelectTrigger data-testid="cust-incentives-visible"><SelectValue/></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="show">إظهار الحوافز</SelectItem>
+            <SelectItem value="hide">إخفاء الحوافز</SelectItem>
+          </SelectContent>
+        </Select>
+        <div className="text-[10px] text-slate-500 mt-1">يخفي أيقونة الحوافز في نافذة طلب الكرت للعميل. لا يحذف السجلات.</div>
+      </div>
       <Button type="submit" disabled={loading} className="w-full bg-[#221340]" data-testid="cust-save">{loading ? "جاري..." : "حفظ"}</Button>
     </form>
   );

@@ -680,55 +680,45 @@ export default function PublicOrder() {
         <ChangePasswordForm phone={phone} currentPassword={password} onClose={() => setShowChangePwd(false)} onDone={(np) => setPassword(np)}/>
       </Dialog>
       <Dialog open={showIncentives} onOpenChange={setShowIncentives}>
-        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto" data-testid="po-incentives-dialog">
+        <DialogContent className="max-w-md" data-testid="po-incentives-dialog">
           <DialogHeader><DialogTitle className="flex items-center gap-2 text-[#221340]"><Gift size={18}/> الحوافز</DialogTitle></DialogHeader>
           {!incentives.enabled && (incentives.history || []).length === 0 && (
-            <div className="text-center p-6 text-slate-500 text-sm">نظام الحوافز غير مفعّل لحسابك حالياً.</div>
+            <div className="text-center p-6 text-slate-500 text-sm">لا توجد حوافز حالياً</div>
           )}
           {(incentives.enabled || (incentives.history || []).length > 0) && (
-            <div className="space-y-3">
-              {incentives.enabled && (
-                <div className="text-xs text-slate-500">التفاصيل التالية محسوبة تراكمياً من كل مبيعاتك (نقدية + آجلة + إلكترونية) لكل فئة.</div>
-              )}
+            <div className="space-y-2">
               {(incentives.categories || []).length === 0 && incentives.enabled && (
                 <div className="text-center p-4 text-slate-400 text-sm">لا توجد قواعد حوافز نشطة حالياً</div>
               )}
               {(incentives.categories || []).map((row) => (
                 <Card key={row.category_id} className={`p-3 border ${row.pending_qty > 0 ? "border-amber-400 bg-amber-50" : "border-slate-200"}`} data-testid={`po-inc-row-${row.category_id}`}>
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <div className="font-bold text-[#221340]">{row.category_name}</div>
-                      <div className="text-[11px] text-slate-500">القاعدة: كل {row.buy_qty} كرت = حافز {row.reward_qty}</div>
-                    </div>
+                  <div className="flex justify-between items-center">
+                    <div className="font-bold text-[#221340]">{row.category_name}</div>
                     {row.pending_qty > 0 && <span className="bg-amber-500 text-white text-xs rounded-full px-2 py-0.5 font-bold">🎁 {row.pending_qty}</span>}
                   </div>
-                  <div className="grid grid-cols-3 gap-2 text-xs mt-2">
-                    <div className="text-center bg-white rounded p-1"><div className="text-slate-500">المشتراة</div><div className="font-bold text-lg">{row.bought}</div></div>
-                    <div className="text-center bg-white rounded p-1"><div className="text-slate-500">مصروف</div><div className="font-bold text-lg">{row.redeemed}</div></div>
-                    <div className="text-center bg-white rounded p-1"><div className="text-slate-500">مستحق</div><div className="font-bold text-lg text-amber-700">{row.pending_qty}</div></div>
-                  </div>
-                  <div className="text-[11px] mt-2 text-slate-600 text-center">{row.status_text}</div>
-                  {row.pending_qty > 0 && (
-                    <div className="grid grid-cols-2 gap-1 mt-2">
-                      <Button size="sm" onClick={() => redeemIncentive(row, "card")} className="bg-[#D4AF37] text-[#1A0F33] hover:bg-[#C5A028] text-xs" data-testid={`po-inc-r-card-${row.category_id}`}>استلام كرت الحافز</Button>
-                      <Button size="sm" onClick={() => redeemIncentive(row, "credit")} variant="outline" className="border-[#452480] text-[#452480] text-xs" data-testid={`po-inc-r-credit-${row.category_id}`}>تقييد المبلغ في حسابي</Button>
+                  <div className="grid grid-cols-2 gap-2 text-sm mt-2">
+                    <div className="text-center bg-white rounded p-2">
+                      <div className="text-[11px] text-slate-500">الكروت المشتراة</div>
+                      <div className="font-bold text-lg">{row.bought}</div>
                     </div>
+                    <div className="text-center bg-white rounded p-2">
+                      <div className="text-[11px] text-slate-500">المتبقي للحافز</div>
+                      <div className="font-bold text-lg text-amber-700">{row.remaining_for_next}</div>
+                    </div>
+                  </div>
+                  {row.pending_qty > 0 && (
+                    <Button size="sm" onClick={() => redeemIncentive(row, "card")} className="w-full mt-2 bg-[#D4AF37] text-[#1A0F33] hover:bg-[#C5A028]" data-testid={`po-inc-r-card-${row.category_id}`}>استلم كروت</Button>
                   )}
                 </Card>
               ))}
               {(incentives.history || []).length > 0 && (
                 <div className="pt-2 border-t">
-                  <div className="text-sm font-bold text-[#221340] mb-2">الحوافز السابقة</div>
-                  <div className="space-y-1 max-h-52 overflow-y-auto">
+                  <div className="text-sm font-bold text-[#221340] mb-2">السجل السابق</div>
+                  <div className="space-y-1 max-h-40 overflow-y-auto">
                     {(incentives.history || []).map((h) => (
                       <div key={h.id} className="text-xs bg-slate-50 rounded p-2 flex justify-between" data-testid={`po-inc-hist-${h.id}`}>
-                        <div>
-                          <div className="font-bold">{h.category_name} × {h.qty}</div>
-                          <div className="text-slate-500">{h.status === "redeemed_credit" ? `تقييد ${fmt(h.redeemed_value || 0)} في الحساب` : `استلام كرت`} — {fmtDate(h.redeemed_at)}</div>
-                        </div>
-                        <div className={`text-[10px] rounded-full px-2 py-0.5 self-start ${h.status === "redeemed_credit" ? "bg-[#452480]/10 text-[#452480]" : "bg-[#D4AF37]/20 text-amber-700"}`}>
-                          {h.status === "redeemed_credit" ? "تقييد" : "كرت"}
-                        </div>
+                        <div><span className="font-bold">{h.category_name}</span> × {h.qty}</div>
+                        <div className="text-slate-500">{fmtDate(h.redeemed_at)}</div>
                       </div>
                     ))}
                   </div>

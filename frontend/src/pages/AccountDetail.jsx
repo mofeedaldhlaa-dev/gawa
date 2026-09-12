@@ -64,21 +64,26 @@ export default function AccountDetail() {
   const acc = data?.account || {};
   const entries = data?.entries || [];
 
+  const [openLastOp, setOpenLastOp] = useState(false);
+  const [lastOp, setLastOp] = useState(null);
+  // lastOp shape: { kind: "receipt"|"expense"|"sale", data: {...} }
+
   const saveVoucher = async () => {
     if (!voucher.amount || Number(voucher.amount) <= 0) { toast.error("أدخل مبلغاً صحيحاً"); return; }
     if (type === "cash") { toast.error("لا يمكن إنشاء سند مباشرة للصندوق"); return; }
     try {
-      // Expense account: create an expense entry (money out of cashbox, into this expense account)
+      let r;
       if (type === "expense") {
-        await api.post("/expenses", {
+        r = await api.post("/expenses", {
           account_id: id,
           amount: Number(voucher.amount),
           description: voucher.description,
           date: voucher.date,
           idempotency_key: genUUID(),
         });
+        setLastOp({ kind: "expense", data: r.data });
       } else {
-        await api.post("/receipts", {
+        r = await api.post("/receipts", {
           kind: voucher.kind,
           party_type: type === "pos" ? "customer" : type,
           party_id: id,
@@ -88,12 +93,43 @@ export default function AccountDetail() {
           date: voucher.date,
           idempotency_key: genUUID(),
         });
+        setLastOp({ kind: "receipt", data: r.data });
       }
       toast.success("تم الحفظ وتحديث الأرصدة");
       setOpenVoucher(false);
       setVoucher({ ...voucher, amount: "", description: "" });
+      setOpenLastOp(true);
       load();
     } catch (e) { toast.error(errText(e)); }
+  };
+
+  const printLastOp = async () => {
+    if (!lastOp) return;
+    try {
+      const banks = (await api.get("/bank-accounts").catch(() => ({ data: [] }))).data || [];
+      if (lastOp.kind === "receipt") {
+        const { printReceipt } = await import("@/lib/print");
+        printReceipt({ receipt: lastOp.data, party: acc, username: acc.name || "", banks });
+      } else {
+        window.print();
+      }
+    } catch (e) { toast.error(errText(e)); }
+  };
+
+  const whatsappLastOp = () => {
+    if (!lastOp) return;
+    const phone = acc.phone || "";
+    if (!phone) { toast.error("لا يوجد رقم هاتف مسجّل لهذا العميل"); return; }
+    const d = lastOp.data || {};
+    let body;
+    if (lastOp.kind === "receipt") {
+      const label = d.kind === "receipt" ? "قبض" : "صرف";
+      body = `عزيزنا ${acc.name || ""}\nتم تسجيل سند ${label} برقم ${d.number || "-"}\nالمبلغ: ${fmt(d.amount || 0)}\n${d.description ? "التفاصيل: " + d.description + "\n" : ""}الرصيد الحالي: ${fmt(d.balance_after != null ? d.balance_after : (acc.balance || 0))}\n\nشبكة جواد نت اللاسلكية`;
+    } else {
+      body = `تم تسجيل عملية بمبلغ ${fmt(d.amount || 0)}\n${d.description || ""}\n\nشبكة جواد نت اللاسلكية`;
+    }
+    const wa = `https://wa.me/${phone.replace(/^0/, "967")}?text=${encodeURIComponent(body)}`;
+    window.open(wa, "_blank");
   };
 
   const sendRequest = async () => {
@@ -270,6 +306,25 @@ export default function AccountDetail() {
           </div>
         </Card>
       )}
+
+      {/* Post-save actions Dialog */}
+      <Dialog open={openLastOp} onOpenChange={setOpenLastOp}>
+        <DialogContent className="max-w-sm" data-testid="last-op-dialog">
+          <DialogHeader><DialogTitle>تمت العملية بنجاح</DialogTitle></DialogHeader>
+          <div className="space-y-2 text-sm">
+            <div className="bg-emerald-50 border border-emerald-200 rounded p-2 text-center">
+              <div className="font-bold text-emerald-800">
+                {lastOp?.kind === "receipt" ? `سند ${lastOp?.data?.kind === "receipt" ? "قبض" : "صرف"} رقم ${lastOp?.data?.number || "-"}` : "تم تسجيل المصروف"}
+              </div>
+              <div className="text-lg font-black num mt-1">{fmt(lastOp?.data?.amount || 0)}</div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Button onClick={printLastOp} variant="outline" data-testid="last-op-print"><Printer size={14} className="ml-1"/> طباعة</Button>
+              <Button onClick={whatsappLastOp} className="bg-green-600 hover:bg-green-700 text-white" data-testid="last-op-wa"><MessageCircle size={14} className="ml-1"/> إرسال واتساب</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Voucher Dialog */}
       <Dialog open={openVoucher} onOpenChange={setOpenVoucher}>

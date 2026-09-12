@@ -1,0 +1,25 @@
+{
+  "summary": "Iteration 14 backend-only regression for the incentives visibility + statement + receipts + payment-request bank message change set. Created /app/backend/tests/test_iteration14_incentives_statement.py with 8 targeted tests covering all 8 review scenarios: (1) customers.incentives_visible persists and defaults to true, (2) /public/card-order/incentives -> enabled=false when customer hides incentives, (3) /public/card-order/incentives -> enabled=false when incentive-settings.exclude_special_price=true AND customer.special_prices_enabled=true (with positive sanity check for a non-special-price customer), (4) /public/card-order/statement returns {customer, entries} respecting UTC+03:00 day boundaries for start==end==today, (5) POST /api/receipts returns full receipt object incl. id/number/balance_after (verified 250 قبض on 1000 debt -> 750), (6) /reports/incentives?kind=pending returns {items,count,total_qty,kind='pending'}, (7) /reports/incentives?kind=redeemed with start/end returns {items,kind='redeemed'}, (8) /payment-requests message auto-appends bank block with NO 'البنك:' prefix and includes both 'إجمالي المديونية: 1,500' and 'المبلغ المطلوب سداده: 700'. ALL 8 TESTS PASS.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration14_incentives_statement.py",
+    "/app/test_reports/pytest/iter14.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is still 3998 lines — needs splitting into modules (repeated from iter 10/13).",
+    "PUT /incentive-settings unconditionally overwrites the doc via $set with the model_dump payload; the _key='incentives' is preserved but any future extra keys stored on the settings doc would be silently lost on partial updates. Consider explicit per-field updates or a stricter model.",
+    "GET /reports/incentives?kind=pending iterates every active customer and calls _customer_incentive_summary per customer (which itself hits db.card_categories + db.incentive_earnings per rule). For O(customers × rules) it will scale poorly; recommend an aggregation.",
+    "In /payment-requests message assembly, bank fields concatenate with a leading newline group but do not guard against missing bank_name/holder/account_number; a partially-populated bank_account row would produce blank labels. Add validation on POST /bank-accounts or skip blanks.",
+    "/public/card-order/statement: on invalid password returns 401 even when the phone doesn't exist (returns 404), leaking whether phone exists in DB — minor enumeration risk on the public portal."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration14_incentives_statement.py"],
+  "success_rate": {"backend": "100% (8/8)", "frontend": "N/A (backend-only run)"},
+  "test_credentials": "MOFEED / EeFSWtdsFRBmb3p (used successfully).",
+  "seed_data_creation": "Each test creates its own TEST_-prefixed customer (unique phone). Categories & bank-account fixtures reuse existing rows if present, else create TEST_-prefixed ones. Also creates 1 incentive_rule for the enabled customer type. Data is left in place; naming prefix keeps it identifiable.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Run tests with:  cd /app && python -m pytest backend/tests/test_iteration14_incentives_statement.py -v -o addopts='' --junitxml=/app/test_reports/pytest/iter14.xml . The suite loads REACT_APP_BACKEND_URL via python-dotenv from /app/frontend/.env. Key endpoints verified: POST /api/customers (incentives_visible), PUT /api/incentive-settings, POST /api/incentive-rules, POST /api/public/card-order/incentives, POST /api/public/card-order/statement, POST /api/receipts (returns balance_after), GET /api/reports/incentives?kind=pending|redeemed, POST /api/payment-requests (message format).",
+  "rca of the issue": "N/A — no bugs found."
+}

@@ -342,6 +342,7 @@ class CustomerIn(BaseModel):
     customer_type: str = "customer"  # customer / pos
     special_prices_enabled: Optional[bool] = False
     special_prices: Optional[List[SpecialPrice]] = []
+    incentives_visible: Optional[bool] = True
 
 class SupplierIn(BaseModel):
     name: str
@@ -1219,6 +1220,8 @@ async def _customer_incentive_summary(customer: dict) -> Dict[str, Any]:
     ctype = customer.get("customer_type", "customer")
     enabled = settings["pos_enabled"] if ctype == "pos" else settings["customer_enabled"]
     if settings.get("exclude_special_price") and customer.get("special_prices_enabled"):
+        enabled = False
+    if customer.get("incentives_visible") is False:
         enabled = False
     rules = await db.incentive_rules.find({"account_type": ctype, "active": True}).to_list(500)
     if not enabled or not rules:
