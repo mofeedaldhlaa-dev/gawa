@@ -1,7 +1,7 @@
 // Simple SW: network-first for API/HTML, cache-first for static assets.
 // Auto-updates on new deploy (skipWaiting + clients.claim).
-const CACHE = "jawad-v1";
-const STATIC_ASSETS = ["/manifest.json", "/icons/icon-192.png", "/icons/icon-512.png"];
+const CACHE = "jawad-v2";
+const STATIC_ASSETS = ["/manifest.json", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/icon-192-maskable.png", "/icons/icon-512-maskable.png", "/apple-touch-icon.png"];
 
 self.addEventListener("install", (e) => {
   self.skipWaiting();
