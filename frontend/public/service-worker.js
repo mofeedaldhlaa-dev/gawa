@@ -1,11 +1,22 @@
-// Simple SW: network-first for API/HTML, cache-first for static assets.
-// Auto-updates on new deploy (skipWaiting + clients.claim).
-const CACHE = "jawad-v2";
-const STATIC_ASSETS = ["/manifest.json", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/icon-192-maskable.png", "/icons/icon-512-maskable.png", "/apple-touch-icon.png"];
+// App-shell service worker: keep the app openable without internet.
+// - Precache app root ("/") and critical icons on install.
+// - For navigations: try network, fall back to cached "/" so the UI still loads.
+// - For static assets: cache-first with background refresh.
+// - Auto-updates on new deploy via skipWaiting + clients.claim.
+const CACHE = "jawad-v3";
+const APP_SHELL = [
+  "/",
+  "/manifest.json",
+  "/icons/icon-192.png",
+  "/icons/icon-512.png",
+  "/icons/icon-192-maskable.png",
+  "/icons/icon-512-maskable.png",
+  "/apple-touch-icon.png",
+];
 
 self.addEventListener("install", (e) => {
   self.skipWaiting();
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(STATIC_ASSETS).catch(() => {})));
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(APP_SHELL).catch(() => {})));
 });
 
 self.addEventListener("activate", (e) => {
@@ -22,19 +33,38 @@ self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
   const url = new URL(req.url);
-  // API / dynamic: network-first
-  if (url.pathname.startsWith("/api/") || req.mode === "navigate") {
+
+  // API: network-only (no offline stale API responses)
+  if (url.pathname.startsWith("/api/")) return;
+
+  // Navigations (HTML documents): network-first, fall back to cached "/"
+  if (req.mode === "navigate") {
     event.respondWith(
-      fetch(req).catch(() => caches.match(req).then((r) => r || caches.match("/")))
+      fetch(req)
+        .then((res) => {
+          // cache a fresh copy of the shell whenever we get one online
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put("/", copy)).catch(() => {});
+          return res;
+        })
+        .catch(() =>
+          caches.match(req).then((cached) => cached || caches.match("/"))
+        )
     );
     return;
   }
-  // Static assets: cache-first
+
+  // Static assets: cache-first + background refresh
   event.respondWith(
-    caches.match(req).then((cached) => cached || fetch(req).then((res) => {
-      const copy = res.clone();
-      caches.open(CACHE).then((c) => c.put(req, copy));
-      return res;
-    }).catch(() => cached))
+    caches.match(req).then((cached) => {
+      const network = fetch(req)
+        .then((res) => {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
+          return res;
+        })
+        .catch(() => cached);
+      return cached || network;
+    })
   );
 });

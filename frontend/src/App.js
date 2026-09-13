@@ -36,6 +36,7 @@ import PublicOrder from "@/pages/PublicOrder";
 import BlockedCustomers from "@/pages/BlockedCustomers";
 import Files from "@/pages/Files";
 import BankAccounts from "@/pages/BankAccounts";
+import OfflineBanner from "@/components/OfflineBanner";
 import "@/index.css";
 import api from "@/lib/api";
 
@@ -258,6 +259,7 @@ export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+        <OfflineBanner />
         <AppRoutes />
         <Toaster position="top-center" />
       </BrowserRouter>
