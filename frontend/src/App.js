@@ -37,6 +37,7 @@ import BlockedCustomers from "@/pages/BlockedCustomers";
 import Files from "@/pages/Files";
 import BankAccounts from "@/pages/BankAccounts";
 import OfflineBanner from "@/components/OfflineBanner";
+import { setActiveManifest } from "@/lib/pwaInstall";
 import "@/index.css";
 import api from "@/lib/api";
 
@@ -218,6 +219,23 @@ function Guard({ children, perm }) {
 }
 
 function AppRoutes() {
+  const location = useLocation();
+  useEffect(() => {
+    // Swap active manifest: admin sub-app uses its own manifest with scope=/mof30,
+    // public GAWAD NET uses the root manifest with scope=/.
+    const adminScope = location.pathname === "/mof30" || location.pathname.startsWith("/dashboard") ||
+      location.pathname.startsWith("/sales") || location.pathname.startsWith("/purchases") ||
+      location.pathname.startsWith("/customers") || location.pathname.startsWith("/suppliers") ||
+      location.pathname.startsWith("/cards") || location.pathname.startsWith("/categories") ||
+      location.pathname.startsWith("/stock") || location.pathname.startsWith("/receipts") ||
+      location.pathname.startsWith("/expenses") || location.pathname.startsWith("/accounts") ||
+      location.pathname.startsWith("/orders") || location.pathname.startsWith("/reports") ||
+      location.pathname.startsWith("/users") || location.pathname.startsWith("/notifications") ||
+      location.pathname.startsWith("/audit") || location.pathname.startsWith("/blocked") ||
+      location.pathname.startsWith("/settings") || location.pathname.startsWith("/files") ||
+      location.pathname.startsWith("/bank-accounts");
+    setActiveManifest(adminScope ? "/manifest-mof30.json" : "/manifest.json");
+  }, [location.pathname]);
   return (
     <Routes>
       <Route path="/mof30" element={<Login />} />

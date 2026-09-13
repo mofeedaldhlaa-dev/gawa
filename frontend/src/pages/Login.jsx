@@ -12,11 +12,20 @@ export default function Login() {
   const [username, setU] = useState("");
   const [password, setP] = useState("");
   const [loading, setLoading] = useState(false);
+  const [online, setOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
 
   useEffect(() => { if (user) nav("/dashboard"); }, [user, nav]);
+  useEffect(() => {
+    const on = () => setOnline(true);
+    const off = () => setOnline(false);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", off);
+    return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); };
+  }, []);
 
   const submit = async (e) => {
     e.preventDefault();
+    if (!online) return;
     setLoading(true);
     const ok = await login(username, password);
     setLoading(false);
@@ -50,7 +59,12 @@ export default function Login() {
               <Input type="password" value={password} onChange={(e) => setP(e.target.value)} required data-testid="login-password" className="text-right" />
             </div>
             {error && <div className="text-sm text-red-600" data-testid="login-error">{error}</div>}
-            <Button type="submit" disabled={loading} data-testid="login-submit" className="w-full bg-[#221340] hover:bg-[#311B5C]">
+            {!online && (
+              <div className="rounded-md border border-red-300 bg-red-50 text-red-800 text-sm px-3 py-2 font-bold text-center" data-testid="login-offline">
+                لا يتوفر اتصال بالإنترنت. لا يمكنك تسجيل الدخول — اتصل بالإنترنت وحاول مجدداً.
+              </div>
+            )}
+            <Button type="submit" disabled={loading || !online} data-testid="login-submit" className="w-full bg-[#221340] hover:bg-[#311B5C]">
               {loading ? "جاري..." : "دخول"}
             </Button>
           </form>

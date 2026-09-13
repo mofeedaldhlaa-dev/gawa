@@ -14,6 +14,7 @@ import { Wifi, CheckCircle, Copy, KeyRound, Phone, Ban, AlertCircle, Printer, Hi
 import { SubscriberFavorites, ContactPickerButton } from "@/components/PhoneInputExtras";
 import { saveOperationImage } from "@/lib/receiptImage";
 import { Download } from "lucide-react";
+import InstallPromptBanner from "@/components/InstallPromptBanner";
 
 const ADMIN_WHATSAPP = "784225716";
 
@@ -225,6 +226,10 @@ export default function PublicOrder() {
   const login = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
     setLoginError(""); setDeviceMismatch(false); setAccountDisabled(false);
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      setLoginError("لا يتوفر اتصال بالإنترنت. لا يمكنك تسجيل الدخول — اتصل بالإنترنت وحاول مجدداً.");
+      return;
+    }
     if (!phone || !password) { setLoginError("أدخل رقم الهاتف وكلمة المرور"); return; }
     setLoading(true);
     try {
@@ -429,6 +434,8 @@ export default function PublicOrder() {
             <div className="text-xl font-black text-[#221340] mt-1">قم بتسجيل الدخول</div>
           </div>
         )}
+
+        {!customer && <InstallPromptBanner />}
 
         {!customer && (
           <form onSubmit={login} className="space-y-3" data-testid="po-login-form" noValidate>

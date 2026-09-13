@@ -9,8 +9,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { fmt } from "@/lib/utils";
-import { Database, RotateCcw, Trash2, Download, Upload, Send, CloudDownload, Plus, Coins, Bell, X, CheckCircle2 } from "lucide-react";
+import { Database, RotateCcw, Trash2, Download, Upload, Send, CloudDownload, Plus, Coins, Bell, X, CheckCircle2, Smartphone } from "lucide-react";
 import IncentivesManager from "@/pages/IncentivesManager";
+import { useAuth } from "@/lib/auth";
+import { usePWAInstall } from "@/lib/pwaInstall";
 
 function BroadcastPanel() {
   const [customers, setCustomers] = useState([]);
@@ -194,6 +196,107 @@ function CurrenciesManager() {
   );
 }
 
+function InstallAppPanel() {
+  const { user } = useAuth();
+  const { canInstall, installed, promptInstall } = usePWAInstall();
+  const [allowed, setAllowed] = useState([]);
+  const [raw, setRaw] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    api.get("/settings").then((r) => {
+      const list = r.data?.install_allowed_emails || [];
+      setAllowed(list);
+      setRaw(list.join("\n"));
+    }).finally(() => setLoading(false));
+  }, []);
+
+  const meAllowed = user?.email && allowed.map((e) => e.toLowerCase()).includes(user.email.toLowerCase());
+  const isSuperAdmin = user?.role === "admin";
+
+  const save = async () => {
+    const list = raw
+      .split(/[\n,;]+/)
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean);
+    setSaving(true);
+    try {
+      await api.post("/settings", { install_allowed_emails: list });
+      setAllowed(list);
+      toast.success("تم تحديث قائمة المسموح لهم بالتثبيت");
+    } catch (e) { toast.error(errText(e)); }
+    setSaving(false);
+  };
+
+  const doInstall = async () => {
+    if (!meAllowed) { toast.error("هذا الإيميل غير مسموح له بتثبيت تطبيق الإدارة"); return; }
+    if (installed) { toast.info("التطبيق مثبَّت مسبقاً على هذا الجهاز"); return; }
+    if (!canInstall) {
+      toast.error("المتصفح لم يعرض خيار التثبيت بعد. افتح التطبيق مرة أخرى بعد ثوانٍ، أو استخدم قائمة المتصفح: تثبيت التطبيق.");
+      return;
+    }
+    const outcome = await promptInstall();
+    if (outcome === "accepted") toast.success("تم بدء التثبيت");
+  };
+
+  return (
+    <div className="space-y-4" data-testid="install-panel">
+      <div className="rounded-lg border border-[#452480]/20 bg-[#F8F5FF] p-3 flex items-start gap-3">
+        <div className="w-10 h-10 rounded-full bg-[#452480] text-white flex items-center justify-center shrink-0">
+          <Smartphone size={20}/>
+        </div>
+        <div className="flex-1 text-sm">
+          <div className="font-bold text-[#221340]">تطبيق الإدارة (MOF30)</div>
+          <div className="text-xs text-slate-600 mt-1 leading-relaxed">
+            ثبّت لوحة الإدارة كتطبيق مستقل على شاشة الجهاز (يفتح مباشرة على النطاق <span dir="ltr" className="font-mono">/mof30</span>). التثبيت مسموح فقط للإيميلات المضافة أدناه.
+          </div>
+          <div className="mt-2 flex items-center gap-2 flex-wrap">
+            <Button
+              onClick={doInstall}
+              disabled={loading || !meAllowed || installed}
+              className="bg-[#452480] hover:bg-[#5A2FA0] text-white"
+              data-testid="install-admin-btn"
+            >
+              <Download size={14} className="ml-1"/>
+              {installed ? "مثبَّت بالفعل" : (meAllowed ? "تثبيت تطبيق الإدارة" : "غير مسموح لك بالتثبيت")}
+            </Button>
+            <span className="text-[11px] text-slate-500">
+              حالتك: {user?.email ? <span className="font-mono" dir="ltr">{user.email}</span> : "لا يوجد بريد لحسابك"} —
+              {meAllowed ? <span className="text-emerald-700 font-bold"> مسموح</span> : <span className="text-red-700 font-bold"> غير مسموح</span>}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {isSuperAdmin && (
+        <div className="border rounded-lg p-3">
+          <div className="font-bold text-sm text-[#221340] mb-2">قائمة الإيميلات المسموح لها بالتثبيت</div>
+          <div className="text-[11px] text-slate-500 mb-2">إيميل واحد في كل سطر (أو مفصولة بفاصلة).</div>
+          <textarea
+            value={raw}
+            onChange={(e) => setRaw(e.target.value)}
+            rows={4}
+            className="w-full border rounded-md p-2 text-sm font-mono"
+            dir="ltr"
+            placeholder="admin@example.com"
+            data-testid="install-allowed-list"
+          />
+          <div className="mt-2 flex items-center justify-between">
+            <div className="text-[11px] text-slate-500">
+              حالياً: <strong>{allowed.length}</strong> إيميل مسموح
+            </div>
+            <Button onClick={save} disabled={saving} className="bg-[#221340]" data-testid="install-allowed-save">
+              {saving ? "جاري..." : "حفظ القائمة"}
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   const [s, setS] = useState({ currency: "ريال", logo_url: "", low_stock_default: 20, backup_email: "" });
   const [backupEmail, setBackupEmail] = useState("");
@@ -371,6 +474,11 @@ export default function SettingsPage() {
           يظهر الإشعار داخل GAWAD NET في أيقونة 🔔، وتُحسب حالة القراءة لكل حساب باستقلال. لن يتكرر الإشعار عند إعادة التحميل أو تسجيل الدخول.
         </div>
         <BroadcastPanel/>
+      </Card>
+
+      <Card className="p-6 space-y-4" data-testid="install-card">
+        <div className="text-lg font-bold text-[#221340] flex items-center gap-2"><Smartphone size={20}/> تثبيت تطبيق الإدارة</div>
+        <InstallAppPanel/>
       </Card>
 
       <Card className="p-6 space-y-4" data-testid="currencies-panel">

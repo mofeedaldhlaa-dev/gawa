@@ -474,6 +474,7 @@ class SettingsIn(BaseModel):
     backup_email: Optional[str] = None
     backup_time: Optional[str] = None
     backup_auto: Optional[bool] = None
+    install_allowed_emails: Optional[List[str]] = None
 
 
 # ================= AUTH =================
@@ -4042,6 +4043,7 @@ async def get_settings(user=Depends(get_current_user)):
         "backup_email": doc.get("backup_email", ""),
         "backup_time": doc.get("backup_time", "02:00"),
         "backup_auto": bool(doc.get("backup_auto", False)),
+        "install_allowed_emails": doc.get("install_allowed_emails", ["mofeedaldhlaa@gmail.com"]),
     }
 
 @api.post("/settings")
@@ -4055,6 +4057,14 @@ async def update_settings(data: SettingsIn, user=Depends(require_perm("settings"
             if not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", v):
                 raise HTTPException(status_code=400, detail="البريد الإلكتروني غير صحيح")
         update["backup_email"] = v
+    if "install_allowed_emails" in update:
+        emails = [str(e).strip().lower() for e in (update["install_allowed_emails"] or []) if str(e).strip()]
+        import re
+        rx = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+        bad = [e for e in emails if not rx.match(e)]
+        if bad:
+            raise HTTPException(status_code=400, detail=f"إيميل غير صحيح: {bad[0]}")
+        update["install_allowed_emails"] = emails
     await db.settings.update_one({"key": "app_settings"}, {"$set": update}, upsert=True)
     return {"ok": True}
 
