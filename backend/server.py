@@ -1295,33 +1295,29 @@ async def admin_quick_recharge_lookup(data: AdminQuickTransferIn, user=Depends(r
 @api.post("/admin/quick-recharge/confirm")
 async def admin_quick_recharge_confirm(data: AdminQuickTransferIn, user=Depends(require_perm("receipts"))):
     if not data.idempotency_key: raise HTTPException(status_code=400, detail="مفتاح الحماية مطلوب")
-    existing = await db.transfers.find_one({"idempotency_key": data.idempotency_key})
+    existing = await db.receipts.find_one({"idempotency_key": data.idempotency_key})
     if existing: return clean_doc(existing)
     if data.amount <= 0: raise HTTPException(status_code=400, detail="المبلغ غير صحيح")
     recipient = await db.customers.find_one({"phone": data.recipient_phone})
     if not recipient: raise HTTPException(status_code=404, detail="حساب المستلم غير موجود")
     number = await next_gwd_number()
-    desc = f"شحن سريع من شبكة جواد نت اللاسلكية"
-    # 1) credit recipient (balance decreases = customer becomes in credit / debt decreases)
-    await _adjust_party_balance("customer", recipient["id"], -float(data.amount), number, desc)
-    # 2) log a cash→customer transfer to affect the cash box
+    desc = "شحن سريع من شبكة جواد نت اللاسلكية"
+    # Behave exactly like a receipt (سند قبض): credit customer + cash goes UP (income).
+    balance_after = await _adjust_party_balance(
+        "customer", recipient["id"], -float(data.amount), number, desc
+    )
     doc = {
         "id": str(uuid.uuid4()), "number": number, "idempotency_key": data.idempotency_key,
-        "source_type": "cash", "source_id": None, "source_name": "الصندوق",
-        "dest_type": "customer", "dest_id": recipient["id"], "dest_name": recipient.get("name",""),
+        "type": "receipt_voucher", "kind": "receipt",
+        "party_type": "customer", "party_id": recipient["id"], "party_name": recipient.get("name", ""),
         "amount": float(data.amount), "description": desc,
-        "block_negative": False,
         "user_id": user["id"], "username": user.get("username"),
         "status": "active",
+        "balance_after": balance_after,
         "channel": "admin_quick_recharge",
         "created_at": now_iso(),
-        # keep legacy keys so it also appears in transfer statements
-        "sender_name": "شبكة جواد نت اللاسلكية",
-        "recipient_id": recipient["id"], "recipient_name": recipient.get("name",""),
-        "recipient_phone": recipient.get("phone",""), "commission": 0.0,
     }
-    await db.transfers.insert_one(doc)
-    # 3) notify recipient
+    await db.receipts.insert_one(doc)
     await db.notifications.insert_one({
         "id": str(uuid.uuid4()), "title": "استلام شحن",
         "message": f"تم استلام {float(data.amount):,.0f} من شبكة جواد نت اللاسلكية — عملية {number}.",

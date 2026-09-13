@@ -11,6 +11,7 @@ import { fmt, fmtDate, openWhatsApp, openSMS, phoneFingerprint } from "@/lib/uti
 import { printStatement } from "@/lib/print";
 import { printPublicOrder } from "@/lib/print";
 import { Wifi, CheckCircle, Copy, KeyRound, Phone, Ban, AlertCircle, Printer, History, Search, ContactRound, Send, MessageSquare, FileText, Gift, Landmark, Bell, Users, ArrowLeftRight, ChevronDown, ChevronUp } from "lucide-react";
+import { SubscriberFavorites, ContactPickerButton } from "@/components/PhoneInputExtras";
 
 const ADMIN_WHATSAPP = "784225716";
 
@@ -564,7 +565,21 @@ export default function PublicOrder() {
 
             {mode === "transfer" && (
               <Card className="p-3 space-y-2 border-2 border-[#452480]/30" data-testid="po-transfer">
-                <div><Label>رقم هاتف المشترك</Label><Input inputMode="tel" value={tRecipient} onChange={(e) => { setTRecipient(e.target.value); setTConfirm(null); }} data-testid="po-t-phone"/></div>
+                <div>
+                  <Label>رقم هاتف المشترك</Label>
+                  <div className="flex items-center gap-1">
+                    <Input inputMode="tel" value={tRecipient} onChange={(e) => { setTRecipient(e.target.value); setTConfirm(null); }} data-testid="po-t-phone" className="flex-1"/>
+                    <SubscriberFavorites
+                      currentPhone={tRecipient}
+                      onPick={(f) => { setTRecipient(f.phone); setTConfirm(null); }}
+                      testidPrefix="po-t-fav"
+                    />
+                    <ContactPickerButton
+                      onPick={(c) => { setTRecipient(c.phone); setTConfirm(null); }}
+                      testid="po-t-contact-pick"
+                    />
+                  </div>
+                </div>
                 <div><Label>المبلغ</Label><Input type="number" inputMode="decimal" value={tAmount} onChange={(e) => { setTAmount(e.target.value); setTConfirm(null); }} data-testid="po-t-amount"/></div>
                 {!tConfirm && <Button onClick={doTransferLookup} className="w-full bg-[#452480]" data-testid="po-t-lookup">موافقة</Button>}
                 {tConfirm && (

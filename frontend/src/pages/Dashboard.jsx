@@ -11,16 +11,18 @@ import { ShoppingCart, Package, Users, Truck, Boxes, CreditCard, Receipt, FileBa
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { genUUID } from "@/lib/utils";
+import { SubscriberFavorites, ContactPickerButton } from "@/components/PhoneInputExtras";
 
 function QuickRechargeButton() {
   const [open, setOpen] = useState(false);
   const [recipientPhone, setRecipientPhone] = useState("");
+  const [recipientName, setRecipientName] = useState("");
   const [amount, setAmount] = useState("");
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  const reset = () => { setRecipientPhone(""); setAmount(""); setPreview(null); setLoading(false); setSubmitting(false); };
+  const reset = () => { setRecipientPhone(""); setRecipientName(""); setAmount(""); setPreview(null); setLoading(false); setSubmitting(false); };
   const onOpenChange = (v) => { if (!v) reset(); setOpen(v); };
 
   const doLookup = async () => {
@@ -61,12 +63,28 @@ function QuickRechargeButton() {
         <DialogContent className="max-w-md" data-testid="qr-dialog">
           <DialogHeader><DialogTitle className="flex items-center gap-2 text-[#221340]"><Zap size={18} className="text-[#D4AF37]"/> شحن سريع</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <div className="text-xs text-[#452480] bg-[#452480]/5 border border-[#452480]/20 rounded p-2 flex items-start gap-2">
-              <Wallet size={14} className="mt-0.5 shrink-0"/>
-              <div>يُخصم المبلغ من <b>الصندوق</b> باسم <b>شبكة جواد نت اللاسلكية</b> بدون عمولة.</div>
-            </div>
-            <div><Label>رقم هاتف المستلم</Label>
-              <Input inputMode="tel" value={recipientPhone} onChange={(e) => { setRecipientPhone(e.target.value); setPreview(null); }} placeholder="مثال: 7XXXXXXXX" data-testid="qr-recipient"/>
+            <div>
+              <Label>رقم هاتف المستلم</Label>
+              <div className="flex items-center gap-1">
+                <Input
+                  inputMode="tel"
+                  value={recipientPhone}
+                  onChange={(e) => { setRecipientPhone(e.target.value); setPreview(null); }}
+                  placeholder="مثال: 7XXXXXXXX"
+                  data-testid="qr-recipient"
+                  className="flex-1"
+                />
+                <SubscriberFavorites
+                  currentPhone={recipientPhone}
+                  currentName={recipientName}
+                  onPick={(f) => { setRecipientPhone(f.phone); setRecipientName(f.name); setPreview(null); }}
+                  testidPrefix="qr-fav"
+                />
+                <ContactPickerButton
+                  onPick={(c) => { setRecipientPhone(c.phone); setRecipientName(c.name || ""); setPreview(null); }}
+                  testid="qr-contact-pick"
+                />
+              </div>
             </div>
             <div><Label>المبلغ</Label>
               <Input type="number" inputMode="decimal" value={amount} onChange={(e) => { setAmount(e.target.value); setPreview(null); }} data-testid="qr-amount"/>
@@ -79,8 +97,6 @@ function QuickRechargeButton() {
             {preview && (
               <div className="space-y-1.5 bg-emerald-50 border-2 border-emerald-300 rounded-lg p-3 text-sm" data-testid="qr-preview">
                 <div className="flex justify-between"><span className="text-slate-600">المرسل:</span><span className="font-bold">{preview.sender_name}</span></div>
-                <div className="flex justify-between"><span className="text-slate-600">مصدر المبلغ:</span><span className="font-bold">الصندوق</span></div>
-                <div className="border-t my-1"></div>
                 <div className="flex justify-between"><span className="text-slate-600">اسم المستلم:</span><span className="font-bold">{preview.recipient_name}</span></div>
                 <div className="flex justify-between"><span className="text-slate-600">رقم المستلم:</span><span className="font-mono">{preview.recipient_phone}</span></div>
                 <div className="flex justify-between"><span className="text-slate-600">نوع المستلم:</span><span>{preview.recipient_type === "pos" ? "نقطة بيع" : "عميل"}</span></div>
@@ -88,7 +104,7 @@ function QuickRechargeButton() {
                 <div className="flex justify-between font-bold"><span>مبلغ الشحن:</span><span className="num">{fmt(preview.amount)}</span></div>
                 <div className="flex justify-between text-emerald-700 font-bold"><span>المبلغ المستلم:</span><span className="num">{fmt(preview.recipient_credit)}</span></div>
                 <div className="flex justify-between text-slate-500 text-xs"><span>العمولة:</span><span className="num">0</span></div>
-                <div className="flex justify-between font-black text-red-700 border-t pt-1"><span>الخصم من الصندوق:</span><span className="num">{fmt(preview.cash_debit)}</span></div>
+                <div className="flex justify-between font-black text-emerald-700 border-t pt-1"><span>الإضافة إلى الصندوق:</span><span className="num">{fmt(preview.amount)}</span></div>
               </div>
             )}
           </div>
