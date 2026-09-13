@@ -7,7 +7,107 @@ import { fmt, fmtDate } from "@/lib/utils";
 import { printReport } from "@/lib/print";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
-import { ShoppingCart, Package, Users, Truck, Boxes, CreditCard, Receipt, FileBarChart, Ticket, PlusCircle, AlertTriangle, Wallet, Printer, Search, ChevronDown, ChevronUp } from "lucide-react";
+import { ShoppingCart, Package, Users, Truck, Boxes, CreditCard, Receipt, FileBarChart, Ticket, PlusCircle, AlertTriangle, Wallet, Printer, Search, ChevronDown, ChevronUp, Zap, ArrowLeftRight } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { genUUID } from "@/lib/utils";
+
+function QuickRechargeButton() {
+  const [open, setOpen] = useState(false);
+  const [senderPhone, setSenderPhone] = useState("");
+  const [recipientPhone, setRecipientPhone] = useState("");
+  const [amount, setAmount] = useState("");
+  const [preview, setPreview] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  const reset = () => { setSenderPhone(""); setRecipientPhone(""); setAmount(""); setPreview(null); setLoading(false); setSubmitting(false); };
+  const onOpenChange = (v) => { if (!v) reset(); setOpen(v); };
+
+  const doLookup = async () => {
+    if (!senderPhone.trim() || !recipientPhone.trim()) { toast.error("رقم المرسل والمستلم مطلوبان"); return; }
+    const a = parseFloat(amount);
+    if (!a || a <= 0) { toast.error("المبلغ غير صحيح"); return; }
+    setLoading(true); setPreview(null);
+    try {
+      const r = await api.post("/admin/quick-recharge/lookup", { sender_phone: senderPhone.trim(), recipient_phone: recipientPhone.trim(), amount: a });
+      setPreview(r.data);
+    } catch (e) { toast.error(e?.response?.data?.detail || "تعذّر التحقق"); }
+    setLoading(false);
+  };
+  const doConfirm = async () => {
+    if (!preview) return;
+    setSubmitting(true);
+    try {
+      const r = await api.post("/admin/quick-recharge/confirm", {
+        sender_phone: senderPhone.trim(), recipient_phone: recipientPhone.trim(),
+        amount: preview.amount, idempotency_key: genUUID(),
+      });
+      toast.success(`تم الشحن بنجاح — عملية ${r.data.number}`);
+      reset(); setOpen(false);
+    } catch (e) { toast.error(e?.response?.data?.detail || "فشل التنفيذ"); }
+    setSubmitting(false);
+  };
+
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        data-testid="quick-recharge"
+        className="flex flex-col items-center justify-center gap-2 p-4 bg-white border-2 border-[#D4AF37] rounded-xl hover:bg-[#D4AF37]/10 hover:shadow-md transition min-h-[80px]"
+      >
+        <Zap size={22} className="text-[#D4AF37]"/>
+        <span className="text-sm font-bold text-[#221340] text-center">شحن سريع</span>
+      </button>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-w-md" data-testid="qr-dialog">
+          <DialogHeader><DialogTitle className="flex items-center gap-2 text-[#221340]"><Zap size={18} className="text-[#D4AF37]"/> شحن سريع</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label>رقم هاتف المرسل (يُخصم منه)</Label>
+              <Input inputMode="tel" value={senderPhone} onChange={(e) => { setSenderPhone(e.target.value); setPreview(null); }} placeholder="مثال: 7XXXXXXXX" data-testid="qr-sender"/>
+            </div>
+            <div><Label>رقم هاتف المستلم (يُضاف له)</Label>
+              <Input inputMode="tel" value={recipientPhone} onChange={(e) => { setRecipientPhone(e.target.value); setPreview(null); }} placeholder="مثال: 7XXXXXXXX" data-testid="qr-recipient"/>
+            </div>
+            <div><Label>المبلغ</Label>
+              <Input type="number" inputMode="decimal" value={amount} onChange={(e) => { setAmount(e.target.value); setPreview(null); }} data-testid="qr-amount"/>
+            </div>
+            {!preview && (
+              <Button onClick={doLookup} disabled={loading} className="w-full bg-[#452480] hover:bg-[#5A2FA0]" data-testid="qr-lookup">
+                <Search size={14} className="ml-1"/> {loading ? "جاري..." : "موافقة"}
+              </Button>
+            )}
+            {preview && (
+              <div className="space-y-1.5 bg-emerald-50 border-2 border-emerald-300 rounded-lg p-3 text-sm" data-testid="qr-preview">
+                <div className="flex justify-between"><span className="text-slate-600">اسم المرسل:</span><span className="font-bold">{preview.sender_name}</span></div>
+                <div className="flex justify-between"><span className="text-slate-600">نوع المرسل:</span><span>{preview.sender_type === "pos" ? "نقطة بيع" : "عميل"}</span></div>
+                <div className="border-t my-1"></div>
+                <div className="flex justify-between"><span className="text-slate-600">اسم المستلم:</span><span className="font-bold">{preview.recipient_name}</span></div>
+                <div className="flex justify-between"><span className="text-slate-600">رقم المستلم:</span><span className="font-mono">{preview.recipient_phone}</span></div>
+                <div className="flex justify-between"><span className="text-slate-600">نوع المستلم:</span><span>{preview.recipient_type === "pos" ? "نقطة بيع" : "عميل"}</span></div>
+                <div className="border-t my-1"></div>
+                <div className="flex justify-between"><span className="text-slate-600">مبلغ التحويل:</span><span className="font-bold num">{fmt(preview.amount)}</span></div>
+                <div className="flex justify-between text-emerald-700 font-bold"><span>المبلغ المستلم:</span><span className="num">{fmt(preview.recipient_credit)}</span></div>
+                {preview.commission > 0 && (
+                  <div className="flex justify-between text-amber-700"><span>عمولة نقاط البيع (10%):</span><span className="num">{fmt(preview.commission)}</span></div>
+                )}
+                <div className="flex justify-between font-black text-red-700 border-t pt-1"><span>الخصم من رصيد المرسل:</span><span className="num">{fmt(preview.sender_debit)}</span></div>
+              </div>
+            )}
+          </div>
+          {preview && (
+            <DialogFooter className="gap-2 pt-2">
+              <Button onClick={() => setPreview(null)} variant="outline" data-testid="qr-back">تعديل</Button>
+              <Button onClick={doConfirm} disabled={submitting} className="bg-emerald-600 hover:bg-emerald-700" data-testid="qr-confirm">
+                <ArrowLeftRight size={14} className="ml-1"/> {submitting ? "جاري..." : "تأكيد الشحن"}
+              </Button>
+            </DialogFooter>
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
 
 const _iso = (d) => d.toISOString().slice(0, 10);
 const _startOfToday = () => { const d = new Date(); d.setHours(0,0,0,0); return d; };
@@ -233,6 +333,7 @@ export default function Dashboard() {
       <div>
         <div className="text-sm font-bold text-[#221340] mb-3">اختصارات سريعة</div>
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2 sm:gap-3">
+          <QuickRechargeButton />
           <Quick to="/sales/new" label="فاتورة مبيعات" icon={ShoppingCart} testid="quick-sale" />
           <Quick to="/purchases/new" label="فاتورة مشتريات" icon={Package} testid="quick-purchase" />
           <Quick to="/receipts" label="سند قبض/صرف" icon={Receipt} testid="quick-receipt" />

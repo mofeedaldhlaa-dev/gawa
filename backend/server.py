@@ -1271,6 +1271,78 @@ async def public_transfer_confirm(data: TransferConfirmIn):
     return clean_doc(doc)
 
 
+# ================= ADMIN QUICK RECHARGE (same math as public transfer) =================
+class AdminQuickTransferIn(BaseModel):
+    sender_phone: str
+    recipient_phone: str
+    amount: float
+    idempotency_key: Optional[str] = None
+
+@api.post("/admin/quick-recharge/lookup")
+async def admin_quick_recharge_lookup(data: AdminQuickTransferIn, user=Depends(require_perm("receipts"))):
+    sender = await db.customers.find_one({"phone": data.sender_phone})
+    if not sender: raise HTTPException(status_code=404, detail="حساب المرسل غير موجود")
+    if data.amount <= 0: raise HTTPException(status_code=400, detail="المبلغ غير صحيح")
+    recipient = await db.customers.find_one({"phone": data.recipient_phone})
+    if not recipient: raise HTTPException(status_code=404, detail="حساب المستلم غير موجود")
+    if recipient.get("id") == sender.get("id"):
+        raise HTTPException(status_code=400, detail="لا يمكن التحويل لنفس الحساب")
+    commission = _transfer_commission(sender, data.amount)
+    sender_debit = (data.amount - commission) if sender.get("customer_type") == "pos" else (data.amount + commission)
+    limit = float(sender.get("credit_limit") or 0)
+    if limit > 0 and float(sender.get("balance") or 0) + sender_debit > limit:
+        raise HTTPException(status_code=400, detail=f"تتجاوز عملية التحويل سقف الحساب ({limit:,.0f})")
+    return {
+        "sender_id": sender["id"], "sender_name": sender.get("name",""), "sender_phone": sender.get("phone",""),
+        "sender_type": sender.get("customer_type", "customer"),
+        "sender_balance": float(sender.get("balance") or 0), "sender_limit": limit,
+        "recipient_id": recipient["id"], "recipient_name": recipient.get("name",""),
+        "recipient_phone": recipient.get("phone",""), "recipient_type": recipient.get("customer_type","customer"),
+        "amount": float(data.amount), "commission": commission,
+        "sender_debit": sender_debit, "recipient_credit": float(data.amount),
+    }
+
+@api.post("/admin/quick-recharge/confirm")
+async def admin_quick_recharge_confirm(data: AdminQuickTransferIn, user=Depends(require_perm("receipts"))):
+    if not data.idempotency_key: raise HTTPException(status_code=400, detail="مفتاح الحماية مطلوب")
+    existing = await db.transfers.find_one({"idempotency_key": data.idempotency_key})
+    if existing: return clean_doc(existing)
+    sender = await db.customers.find_one({"phone": data.sender_phone})
+    if not sender: raise HTTPException(status_code=404, detail="حساب المرسل غير موجود")
+    recipient = await db.customers.find_one({"phone": data.recipient_phone})
+    if not recipient: raise HTTPException(status_code=404, detail="حساب المستلم غير موجود")
+    if recipient.get("id") == sender.get("id"):
+        raise HTTPException(status_code=400, detail="لا يمكن التحويل لنفس الحساب")
+    if data.amount <= 0: raise HTTPException(status_code=400, detail="المبلغ غير صحيح")
+    commission = _transfer_commission(sender, data.amount)
+    sender_debit = (data.amount - commission) if sender.get("customer_type") == "pos" else (data.amount + commission)
+    limit = float(sender.get("credit_limit") or 0)
+    if limit > 0 and float(sender.get("balance") or 0) + sender_debit > limit:
+        raise HTTPException(status_code=400, detail="تتجاوز العملية سقف الحساب")
+    number = await next_gwd_number()
+    doc = {
+        "id": str(uuid.uuid4()), "number": number, "idempotency_key": data.idempotency_key,
+        "sender_id": sender["id"], "sender_name": sender.get("name",""), "sender_phone": sender.get("phone",""),
+        "sender_type": sender.get("customer_type", "customer"),
+        "recipient_id": recipient["id"], "recipient_name": recipient.get("name",""),
+        "recipient_phone": recipient.get("phone",""),
+        "amount": float(data.amount), "commission": commission, "sender_debit": sender_debit,
+        "status": "done", "created_at": now_iso(),
+        "admin_username": user.get("username"), "channel": "admin_quick_recharge",
+    }
+    await _adjust_party_balance("customer", sender["id"], sender_debit, number, f"تحويل رصيد إلى {recipient.get('name','')} ({recipient.get('phone','')})")
+    await _adjust_party_balance("customer", recipient["id"], -float(data.amount), number, f"استلام تحويل من {sender.get('name','')} ({sender.get('phone','')})")
+    await db.transfers.insert_one(doc)
+    await db.notifications.insert_one({
+        "id": str(uuid.uuid4()), "title": "استلام تحويل رصيد",
+        "message": f"تم استلام {float(data.amount):,.0f} من {sender.get('name','')} — عملية {number}.",
+        "type": "success", "read": False, "created_at": now_iso(),
+        "customer_id": recipient["id"], "kind": "transfer",
+    })
+    await audit_log(user, "create", "quick_recharge", doc["id"], None, {"amount": data.amount, "sender": sender.get("phone"), "recipient": recipient.get("phone")})
+    return clean_doc(doc)
+
+
 # ================= NOTIFICATIONS (admin broadcast + customer read) =================
 class BroadcastIn(BaseModel):
     title: str
