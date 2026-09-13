@@ -83,6 +83,9 @@ export default function PublicOrder() {
   const [endDate, setEndDate] = useState("");
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [showTransferHistory, setShowTransferHistory] = useState(false);
+  const [transferHistory, setTransferHistory] = useState([]);
+  const [transferHistoryLoading, setTransferHistoryLoading] = useState(false);
   const [printingStmt, setPrintingStmt] = useState(false);
   const [showStmtDialog, setShowStmtDialog] = useState(false);
   const [stmtStart, setStmtStart] = useState("");
@@ -345,6 +348,16 @@ export default function PublicOrder() {
     setHistoryLoading(false);
   };
 
+  const loadTransferHistory = async (s, e) => {
+    setTransferHistoryLoading(true);
+    try {
+      const r = await api.post("/public/card-order/my-transfers", { phone, password, start: s || null, end: e || null });
+      setTransferHistory(r.data || []);
+      if (!(r.data || []).length) toast.info("لا توجد عمليات في الفترة المحددة");
+    } catch (e) { toast.error(errText(e)); }
+    setTransferHistoryLoading(false);
+  };
+
   const doPrint = (order) => {
     printPublicOrder({ order, customer });
   };
@@ -600,6 +613,47 @@ export default function PublicOrder() {
                   </div>
                 )}
               </Card>
+            )}
+            {mode === "transfer" && (
+              <div className="pt-3 border-t" data-testid="po-transfer-history-wrap">
+                <button type="button" onClick={() => setShowTransferHistory((v) => !v)} className="w-full flex items-center justify-between text-sm font-bold text-[#221340]" data-testid="po-transfer-history-toggle">
+                  <span className="flex items-center gap-2"><History size={16}/> العمليات السابقة</span>
+                  <span className="text-[#452480]">{showTransferHistory ? "إخفاء" : "عرض"}</span>
+                </button>
+                {showTransferHistory && (
+                  <div className="mt-3 space-y-3" data-testid="po-transfer-history">
+                    <StatementPeriodPicker
+                      onCancel={() => setShowTransferHistory(false)}
+                      onPrint={(s, e) => loadTransferHistory(s, e)}
+                      loading={transferHistoryLoading}
+                      submitLabel="بحث"
+                      submitIcon={<Search size={14} className="ml-1"/>}
+                      hideCancel
+                    />
+                    <div className="space-y-2">
+                      {transferHistory.map((t) => (
+                        <Card key={t.id} className="p-3 text-sm border-slate-200" data-testid={`po-transfer-${t.id}`}>
+                          <div className="flex justify-between items-start gap-2">
+                            <div className="min-w-0">
+                              <div className="font-mono font-bold text-[#452480]">{t.number}</div>
+                              <div className="text-xs text-slate-500">{fmtDate(t.created_at)}</div>
+                            </div>
+                            <span className="text-[10px] font-bold rounded-full px-2 py-0.5 bg-[#452480]/10 text-[#452480]">تحويل</span>
+                          </div>
+                          <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                            <div><div className="text-slate-500">المستلم</div><div className="font-bold truncate">{t.recipient_name || "-"}</div></div>
+                            <div><div className="text-slate-500">رقم المستلم</div><div className="font-mono font-bold truncate">{t.recipient_phone || "-"}</div></div>
+                            <div><div className="text-slate-500">مبلغ التحويل</div><div className="num font-bold">{fmt(t.amount)}</div></div>
+                            {t.commission > 0 && <div><div className="text-slate-500">العمولة</div><div className="num font-bold text-amber-700">{fmt(t.commission)}</div></div>}
+                            <div><div className="text-slate-500">الخصم من رصيدك</div><div className="num font-bold text-red-700">{fmt(t.sender_debit)}</div></div>
+                          </div>
+                        </Card>
+                      ))}
+                      {transferHistory.length === 0 && !transferHistoryLoading && <div className="text-center text-xs text-slate-400 py-4">لا توجد عمليات لعرضها. اختر فترة واضغط بحث.</div>}
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
             {orderError && (
               <Card className="p-3 border-2 border-red-400 bg-red-50" data-testid="po-order-error">

@@ -7,7 +7,7 @@ import { fmt, fmtDate } from "@/lib/utils";
 import { printReport } from "@/lib/print";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
-import { ShoppingCart, Package, Users, Truck, Boxes, CreditCard, Receipt, FileBarChart, Ticket, PlusCircle, AlertTriangle, Wallet, Printer, Search, ChevronDown, ChevronUp, Zap, ArrowLeftRight } from "lucide-react";
+import { ShoppingCart, Package, Users, Truck, Boxes, CreditCard, Receipt, FileBarChart, Ticket, PlusCircle, AlertTriangle, Wallet, Printer, Search, ChevronDown, ChevronUp, Zap, ArrowLeftRight, History } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { genUUID } from "@/lib/utils";
@@ -21,9 +21,26 @@ function QuickRechargeButton() {
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [history, setHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
-  const reset = () => { setRecipientPhone(""); setRecipientName(""); setAmount(""); setPreview(null); setLoading(false); setSubmitting(false); };
+  const reset = () => { setRecipientPhone(""); setRecipientName(""); setAmount(""); setPreview(null); setLoading(false); setSubmitting(false); setShowHistory(false); setHistory([]); };
   const onOpenChange = (v) => { if (!v) reset(); setOpen(v); };
+
+  const loadHistory = async () => {
+    setHistoryLoading(true);
+    try {
+      const r = await api.post("/admin/quick-recharge/list", {});
+      setHistory(r.data || []);
+    } catch (e) { toast.error(e?.response?.data?.detail || "تعذّر التحميل"); }
+    setHistoryLoading(false);
+  };
+  const toggleHistory = async () => {
+    const next = !showHistory;
+    setShowHistory(next);
+    if (next && history.length === 0) await loadHistory();
+  };
 
   const doLookup = async () => {
     if (!recipientPhone.trim()) { toast.error("رقم هاتف المستلم مطلوب"); return; }
@@ -107,6 +124,34 @@ function QuickRechargeButton() {
                 <div className="flex justify-between font-black text-emerald-700 border-t pt-1"><span>الإضافة إلى الصندوق:</span><span className="num">{fmt(preview.amount)}</span></div>
               </div>
             )}
+            <div className="pt-3 border-t">
+              <button type="button" onClick={toggleHistory} className="w-full flex items-center justify-between text-sm font-bold text-[#221340]" data-testid="qr-history-toggle">
+                <span className="flex items-center gap-2"><History size={14}/> العمليات السابقة</span>
+                <span className="text-[#452480]">{showHistory ? "إخفاء" : "عرض"}</span>
+              </button>
+              {showHistory && (
+                <div className="mt-2 space-y-2 max-h-72 overflow-y-auto" data-testid="qr-history">
+                  {historyLoading && <div className="text-center text-xs text-slate-400 py-3">جاري التحميل...</div>}
+                  {!historyLoading && history.length === 0 && <div className="text-center text-xs text-slate-400 py-3">لا توجد عمليات سابقة</div>}
+                  {history.map((op) => (
+                    <div key={op.id} className="border rounded-lg p-2 bg-slate-50 text-sm" data-testid={`qr-history-${op.id}`}>
+                      <div className="flex justify-between items-start gap-2">
+                        <div className="min-w-0">
+                          <div className="font-mono font-bold text-[#452480]">{op.number}</div>
+                          <div className="text-[10px] text-slate-500">{(op.created_at || "").replace("T", " ").slice(0, 16)}</div>
+                        </div>
+                        <span className="text-[10px] font-bold rounded-full px-2 py-0.5 bg-emerald-100 text-emerald-800 shrink-0">شحن</span>
+                      </div>
+                      <div className="mt-1 grid grid-cols-2 gap-2 text-xs">
+                        <div><div className="text-slate-500">المستلم</div><div className="font-bold truncate">{op.party_name}</div></div>
+                        <div><div className="text-slate-500">المبلغ</div><div className="num font-bold text-emerald-700">{fmt(op.amount)}</div></div>
+                        {op.username && <div className="col-span-2 text-[10px] text-slate-400">بواسطة: {op.username}</div>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
           {preview && (
             <DialogFooter className="gap-2 pt-2">

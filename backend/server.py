@@ -3254,6 +3254,48 @@ async def public_my_orders(data: CardOrderHistoryIn):
     docs = await db.orders.find(query).sort("created_at", -1).limit(500).to_list(500)
     return [clean_doc(o) for o in docs]
 
+
+@api.post("/public/card-order/my-transfers")
+async def public_my_transfers(data: CardOrderHistoryIn):
+    """Return transfers where the authenticated customer is the sender."""
+    customer = await db.customers.find_one({"phone": data.phone})
+    if not customer:
+        raise HTTPException(status_code=404, detail="لاتمتلك حساب بهذا الرقم")
+    if customer.get("password") != data.password:
+        raise HTTPException(status_code=401, detail="كلمة السر غير صحيحة")
+    if customer.get("status") == "disabled":
+        raise HTTPException(status_code=403, detail="الحساب معطل")
+
+    query: Dict[str, Any] = {"sender_id": customer["id"], "status": {"$ne": "cancelled"}}
+    if data.start or data.end:
+        rng: Dict[str, Any] = {}
+        if data.start:
+            rng["$gte"] = f"{data.start}T00:00:00+03:00"
+        if data.end:
+            rng["$lte"] = f"{data.end}T23:59:59+03:00"
+        query["created_at"] = rng
+    docs = await db.transfers.find(query).sort("created_at", -1).limit(500).to_list(500)
+    return [clean_doc(t) for t in docs]
+
+
+class QuickRechargeListIn(BaseModel):
+    start: Optional[str] = None
+    end: Optional[str] = None
+
+@api.post("/admin/quick-recharge/list")
+async def admin_quick_recharge_list(data: QuickRechargeListIn, user=Depends(require_perm("receipts"))):
+    """List previous quick-recharge operations (stored as receipts with channel=admin_quick_recharge)."""
+    query: Dict[str, Any] = {"channel": "admin_quick_recharge", "status": "active"}
+    if data.start or data.end:
+        rng: Dict[str, Any] = {}
+        if data.start:
+            rng["$gte"] = f"{data.start}T00:00:00+03:00"
+        if data.end:
+            rng["$lte"] = f"{data.end}T23:59:59+03:00"
+        query["created_at"] = rng
+    docs = await db.receipts.find(query).sort("created_at", -1).limit(500).to_list(500)
+    return [clean_doc(r) for r in docs]
+
 class StatementIn(BaseModel):
     phone: str
     password: str
