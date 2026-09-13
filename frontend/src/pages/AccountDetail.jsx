@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { fmt, fmtDate, genUUID } from "@/lib/utils";
+import { fmt, fmtDate, genUUID, openWhatsApp, buildReceiptMessage } from "@/lib/utils";
 import { printReport } from "@/lib/print";
 import { useAuth } from "@/lib/auth";
 import { ArrowRight, Printer, Receipt, FilePlus, Send, MessageCircle, Wallet } from "lucide-react";
@@ -116,20 +116,27 @@ export default function AccountDetail() {
     } catch (e) { toast.error(errText(e)); }
   };
 
-  const whatsappLastOp = () => {
+  const whatsappLastOp = async () => {
     if (!lastOp) return;
     const phone = acc.phone || "";
     if (!phone) { toast.error("لا يوجد رقم هاتف مسجّل لهذا العميل"); return; }
     const d = lastOp.data || {};
     let body;
     if (lastOp.kind === "receipt") {
-      const label = d.kind === "receipt" ? "قبض" : "صرف";
-      body = `عزيزنا ${acc.name || ""}\nتم تسجيل سند ${label} برقم ${d.number || "-"}\nالمبلغ: ${fmt(d.amount || 0)}\n${d.description ? "التفاصيل: " + d.description + "\n" : ""}الرصيد الحالي: ${fmt(d.balance_after != null ? d.balance_after : (acc.balance || 0))}\n\nشبكة جواد نت اللاسلكية`;
+      let company = "شبكة جواد نت اللاسلكية";
+      try { const s = await api.get("/settings"); company = s.data?.company_name || company; } catch {}
+      body = buildReceiptMessage({
+        company,
+        kind: d.kind,
+        number: d.number,
+        amount: d.amount,
+        description: d.description,
+        balance_after: d.balance_after,
+      });
     } else {
       body = `تم تسجيل عملية بمبلغ ${fmt(d.amount || 0)}\n${d.description || ""}\n\nشبكة جواد نت اللاسلكية`;
     }
-    const wa = `https://wa.me/${phone.replace(/^0/, "967")}?text=${encodeURIComponent(body)}`;
-    window.open(wa, "_blank");
+    openWhatsApp(phone, body);
   };
 
   const sendRequest = async () => {

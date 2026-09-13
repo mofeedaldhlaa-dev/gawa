@@ -7,43 +7,48 @@ Arabic (RTL) full-stack ERP for شبكة جواد نت اللاسلكية. Publi
 - `/` → GAWAD NET (PublicOrder). `manifest.json` name=GAWAD NET, start_url=`/`.
 - `/mof30` → Admin login. `manifest-mof30.json` start_url=`/mof30` (separate installable app).
 
-## Latest Delivery (2026-02, iter 15)
-### GAWAD NET
-- Renamed pill from "طلب كرت" → **"GAWAD NET"**.
-- Removed incentives icon from data card. Access is now via 🔔 Bell → tap notification.
-- Bell icon in header shows unread count from `/public/card-order/notifications`.
-- Two operation tabs: **شراء كرت** / **تحويل لمشترك**.
+## Latest Delivery (2026-02, iter 16 — GAWAD NET polish + Admin broadcast UI)
+### GAWAD NET (`/`)
+- Header: Bell moved next to the "GAWAD NET" gold pill at the top (`data-testid="po-bell"`); unread badge counter.
+- Welcome card restored to large size (matches pre-login welcome) with `data-testid="po-welcome"`.
+- Removed auto-popup "مبروك! لديك حوافز مستحقة" card — access moved to bell notifications only.
+- Redesigned **بيانات الحساب** card (`data-testid="po-account-info"`):
+  اسم الحساب • رقم الهاتف • تغيير كلمة المرور • نوع الحساب • السقف • الرصيد الحالي • زر «طباعة كشف حساب».
+- Balance display uses correct accounting sign without inverting semantics:
+  balance > 0 → "X ريال عليه" (red); balance < 0 → "X ريال له" (emerald); 0 → "متعادل".
+- Fixed print-statement button: now opens `po-stmt-dialog` with 4 modes: يومي / شهري / سنوي / مخصص → calls `/public/card-order/statement`.
 
-### تحويل لمشترك (public wallet transfer)
-- Endpoints: `/public/card-order/transfer/lookup` → returns preview with commission. `/public/card-order/transfer/confirm` with `idempotency_key` → executes.
-- **POS commission rule (final):** if sender is POS, commission = 10% of amount, recipient gets FULL amount, sender is debited `amount - commission` (as per user spec). Regular customers: no commission.
-- Guards: recipient existence check, self-transfer blocked, credit-limit enforcement, idempotency dedup.
+### Admin (`/mof30` → Settings)
+- New section **إرسال إشعار** (`data-testid="broadcast-card"`) — visible only to users with `settings` permission.
+  Fields: عنوان الإشعار, نص الإشعار, المستلمون (جميع الحسابات / حساب-حسابات محددة with search + checkboxes),
+  زر «إرسال الإشعار» → `POST /notifications/broadcast`.
+- New **سجل الإشعارات المرسلة** grouped by `group_id` → `GET /notifications/broadcast-log`.
+  Shows title, message, sender, timestamp, total recipients, read count, unread count. Read state is per-customer.
+- Duplicate-prevention: each notification has a unique `id`; broadcast creates one doc per recipient in a single transaction; mark-read is per (notif_id, customer_id).
 
-### Incentives — cycle reset
-- Field `customers.incentive_baseline: [{category_id, bought_at_redeem, reset_at}]`.
-- `_customer_incentive_summary` subtracts baseline from cumulative bought → displays 0 after redeem.
-- Only card redemption resets baseline (and after successful record insert).
-- Redemption creates an "incentive" notification for the customer.
+### Defaults
+- `CustomerIn.credit_limit` default → **500** (backend + `Customers.jsx` form + `Notifications.jsx` approve form).
+  Existing customers untouched.
 
-### Simplified incentive dialog
-- Shows only: bought, remaining_for_next. Single button: **استلم كروت**. Credit option removed.
+### WhatsApp message unification
+- `AccountDetail.jsx` (شاشة الحسابات) now uses `buildReceiptMessage()` from `lib/utils.js` — identical to Receipts screen (شاشة السندات). Same format, ordering, amounts, account name, receipt number, date, type.
 
-### Notifications
-- New collection fields: `customer_id`, `kind` (transfer / incentive / admin_broadcast).
-- Public: `POST /public/card-order/notifications` (list + unread) and `.../mark-read`.
-- Admin broadcast: `POST /notifications/broadcast` (title, message, recipients or all).
-- Log: `GET /notifications/broadcast-log` (grouped by group_id, count + read_count).
-
-### Customer defaults
-- `CustomerIn.credit_limit` default → **500** (only for new records; existing untouched).
+## Previous Delivery (iter 15) — kept
+- تحويل لمشترك (POS commission 10%, recipient gets full).
+- Cumulative incentives with baseline reset per category on redeem.
+- Special prices exclude from incentives.
+- Bank accounts (visibility toggle in invoices/receipts/payment-requests/over-limit).
+- Cascade-safe deletion with audit log.
+- Unified UTC+03 daily reporting.
 
 ## Auth
 - Admins exempt from device-binding. Customers device-bound (5 failed = block).
 
 ## Credentials
-- MOFEED / EeFSWtdsFRBmb3p (18 permissions)
+- MOFEED / EeFSWtdsFRBmb3p (18 permissions, incl. `settings`)
+- Test customer: 771234567 / 1234 (balance=250, limit=500)
 
 ## Backlog
-- P1: Refactor server.py (~4200 lines).
+- P1: Refactor server.py (~4200 lines) into `routers/`.
 - P2: WebAuthn/Passkey login.
-- P2: Admin UI to send broadcasts (endpoint ready, page TBD).
+- P2: MongoDB Atlas migration (BLOCKED on IP whitelist).

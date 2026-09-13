@@ -15,7 +15,7 @@ export default function Notifications() {
   const [items, setItems] = useState([]);
   const [requests, setRequests] = useState([]);
   const [approvingId, setApprovingId] = useState(null);
-  const [approveForm, setApproveForm] = useState({ credit_limit: 5000, customer_type: "customer", password: "" });
+  const [approveForm, setApproveForm] = useState({ credit_limit: 500, customer_type: "customer", password: "" });
   const [searchParams] = useSearchParams();
   const tab = searchParams.get("tab") || "all"; // all | requests
 

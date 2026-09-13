@@ -44,7 +44,7 @@ function SpecialPricesEditor({ f, setF }) {
 }
 
 function CustomerForm({ initial, onSaved, onClose }) {
-  const [f, setF] = useState(initial || { name: "", phone: "", password: "", credit_limit: 0, opening_balance: 0, address: "", notes: "", status: "active", customer_type: "customer", special_prices_enabled: false, special_prices: [], incentives_visible: true });
+  const [f, setF] = useState(initial || { name: "", phone: "", password: "", credit_limit: 500, opening_balance: 0, address: "", notes: "", status: "active", customer_type: "customer", special_prices_enabled: false, special_prices: [], incentives_visible: true });
   const [loading, setLoading] = useState(false);
   const submit = async (e) => {
     e.preventDefault();
