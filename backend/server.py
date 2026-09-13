@@ -480,6 +480,13 @@ class SettingsIn(BaseModel):
 # ================= AUTH =================
 MAX_FAILED_ATTEMPTS = 5
 
+# Unified over-credit-limit user message (shown in card orders and transfers).
+OVER_LIMIT_MSG = (
+    "عذراً رصيدك لا يسمح لتنفيذ العملية\n"
+    "يمكنك إضافة رصيد إلى حسابك بسهولة من أقرب نقطة بيع. "
+    "توجّه إلى أقرب بقالة أو نقطة بيع، وأعطِ موظف نقطة البيع رقم حسابك (رقم الهاتف) لتحويل رصيد إلى حسابك. مجاناً"
+)
+
 @api.post("/auth/login")
 async def login(data: LoginIn):
     ident = (data.username or "").strip()
@@ -1222,7 +1229,7 @@ async def public_transfer_lookup(data: TransferLookupIn):
     limit = float(sender.get("credit_limit") or 0)
     new_balance = float(sender.get("balance") or 0) + total_debit
     if limit > 0 and new_balance > limit:
-        raise HTTPException(status_code=400, detail=f"تتجاوز عملية التحويل سقف الحساب ({limit:,.0f})")
+        raise HTTPException(status_code=400, detail=OVER_LIMIT_MSG)
     return {
         "sender_id": sender["id"], "sender_type": sender.get("customer_type", "customer"),
         "recipient_id": recipient["id"], "recipient_name": recipient.get("name",""),
@@ -1246,7 +1253,7 @@ async def public_transfer_confirm(data: TransferConfirmIn):
     # Credit-limit final check
     limit = float(sender.get("credit_limit") or 0)
     if limit > 0 and float(sender.get("balance") or 0) + sender_debit > limit:
-        raise HTTPException(status_code=400, detail="تتجاوز العملية سقف الحساب")
+        raise HTTPException(status_code=400, detail=OVER_LIMIT_MSG)
     number = await next_gwd_number()
     doc = {
         "id": str(uuid.uuid4()), "number": number, "idempotency_key": data.idempotency_key,
@@ -3139,7 +3146,7 @@ async def public_order(data: CardOrderRequest):
             "quantity": data.quantity, "total": total, "status": "rejected_over_limit",
             "reason": "تجاوز السقف المسموح", "created_at": now_iso(),
         })
-        raise HTTPException(status_code=400, detail="عذراً، لا يمكن تنفيذ الطلب تم تجاوز السقف المسموح الرجى سرعة سداد المبلغ الذي عليكم لتتمكن من الطلب مجدداً.")
+        raise HTTPException(status_code=400, detail=OVER_LIMIT_MSG)
     # Reserve NUMBERED cards ONLY. This endpoint never falls back to quantity stock.
     numbered_avail = await db.cards.count_documents({"category_id": data.category_id, "status": "available"})
     if numbered_avail < data.quantity:

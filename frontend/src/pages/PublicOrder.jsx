@@ -130,7 +130,15 @@ export default function PublicOrder() {
     try {
       const r = await api.post("/public/card-order/transfer/lookup", { phone, password, recipient_phone: tRecipient, amount: Number(tAmount) });
       setTConfirm({ ...r.data, key: Math.random().toString(36).slice(2) + Date.now() });
-    } catch (e) { toast.error(errText(e)); setTConfirm(null); }
+    } catch (e) {
+      const msg = errText(e);
+      if ((msg || "").includes("رصيدك لا يسمح") || (msg || "").includes("سقف") || (msg || "").includes("تجاوز")) {
+        setOrderError(msg);
+      } else {
+        toast.error(msg);
+      }
+      setTConfirm(null);
+    }
   };
   const [tSubmitting, setTSubmitting] = useState(false);
   const doTransferConfirm = async () => {
@@ -143,7 +151,14 @@ export default function PublicOrder() {
       setTConfirm(null); setTRecipient(""); setTAmount("");
       try { const rc = await api.post("/public/card-order/login", { phone, password, device_id: phoneFingerprint() }); setCustomer(rc.data); } catch {}
       loadNotifs();
-    } catch (e) { toast.error(errText(e)); }
+    } catch (e) {
+      const msg = errText(e);
+      if ((msg || "").includes("رصيدك لا يسمح") || (msg || "").includes("سقف") || (msg || "").includes("تجاوز")) {
+        setOrderError(msg);
+      } else {
+        toast.error(msg);
+      }
+    }
     setTSubmitting(false);
   };
 
@@ -708,8 +723,8 @@ export default function PublicOrder() {
               </div>
             )}
             {orderError && (
-              <Card className="p-3 border-2 border-red-400 bg-red-50" data-testid="po-order-error">
-                <div className="text-red-800 font-bold text-sm text-center">{orderError}</div>
+              <Card className="p-4 border-2 border-red-400 bg-red-50" data-testid="po-order-error">
+                <div className="text-red-800 font-bold text-sm text-center whitespace-pre-line leading-relaxed">{orderError}</div>
                 {overLimitBanks.length > 0 && (
                   <div className="mt-3 pt-3 border-t border-red-300">
                     <div className="text-[11px] text-slate-600 mb-1 font-bold">للسداد يمكنك التحويل إلى:</div>
