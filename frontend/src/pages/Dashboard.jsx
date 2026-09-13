@@ -14,23 +14,22 @@ import { genUUID } from "@/lib/utils";
 
 function QuickRechargeButton() {
   const [open, setOpen] = useState(false);
-  const [senderPhone, setSenderPhone] = useState("");
   const [recipientPhone, setRecipientPhone] = useState("");
   const [amount, setAmount] = useState("");
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  const reset = () => { setSenderPhone(""); setRecipientPhone(""); setAmount(""); setPreview(null); setLoading(false); setSubmitting(false); };
+  const reset = () => { setRecipientPhone(""); setAmount(""); setPreview(null); setLoading(false); setSubmitting(false); };
   const onOpenChange = (v) => { if (!v) reset(); setOpen(v); };
 
   const doLookup = async () => {
-    if (!senderPhone.trim() || !recipientPhone.trim()) { toast.error("رقم المرسل والمستلم مطلوبان"); return; }
+    if (!recipientPhone.trim()) { toast.error("رقم هاتف المستلم مطلوب"); return; }
     const a = parseFloat(amount);
     if (!a || a <= 0) { toast.error("المبلغ غير صحيح"); return; }
     setLoading(true); setPreview(null);
     try {
-      const r = await api.post("/admin/quick-recharge/lookup", { sender_phone: senderPhone.trim(), recipient_phone: recipientPhone.trim(), amount: a });
+      const r = await api.post("/admin/quick-recharge/lookup", { recipient_phone: recipientPhone.trim(), amount: a });
       setPreview(r.data);
     } catch (e) { toast.error(e?.response?.data?.detail || "تعذّر التحقق"); }
     setLoading(false);
@@ -40,8 +39,7 @@ function QuickRechargeButton() {
     setSubmitting(true);
     try {
       const r = await api.post("/admin/quick-recharge/confirm", {
-        sender_phone: senderPhone.trim(), recipient_phone: recipientPhone.trim(),
-        amount: preview.amount, idempotency_key: genUUID(),
+        recipient_phone: recipientPhone.trim(), amount: preview.amount, idempotency_key: genUUID(),
       });
       toast.success(`تم الشحن بنجاح — عملية ${r.data.number}`);
       reset(); setOpen(false);
@@ -63,10 +61,11 @@ function QuickRechargeButton() {
         <DialogContent className="max-w-md" data-testid="qr-dialog">
           <DialogHeader><DialogTitle className="flex items-center gap-2 text-[#221340]"><Zap size={18} className="text-[#D4AF37]"/> شحن سريع</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <div><Label>رقم هاتف المرسل (يُخصم منه)</Label>
-              <Input inputMode="tel" value={senderPhone} onChange={(e) => { setSenderPhone(e.target.value); setPreview(null); }} placeholder="مثال: 7XXXXXXXX" data-testid="qr-sender"/>
+            <div className="text-xs text-[#452480] bg-[#452480]/5 border border-[#452480]/20 rounded p-2 flex items-start gap-2">
+              <Wallet size={14} className="mt-0.5 shrink-0"/>
+              <div>يُخصم المبلغ من <b>الصندوق</b> باسم <b>شبكة جواد نت اللاسلكية</b> بدون عمولة.</div>
             </div>
-            <div><Label>رقم هاتف المستلم (يُضاف له)</Label>
+            <div><Label>رقم هاتف المستلم</Label>
               <Input inputMode="tel" value={recipientPhone} onChange={(e) => { setRecipientPhone(e.target.value); setPreview(null); }} placeholder="مثال: 7XXXXXXXX" data-testid="qr-recipient"/>
             </div>
             <div><Label>المبلغ</Label>
@@ -74,24 +73,22 @@ function QuickRechargeButton() {
             </div>
             {!preview && (
               <Button onClick={doLookup} disabled={loading} className="w-full bg-[#452480] hover:bg-[#5A2FA0]" data-testid="qr-lookup">
-                <Search size={14} className="ml-1"/> {loading ? "جاري..." : "موافقة"}
+                <Search size={14} className="ml-1"/> {loading ? "جاري..." : "بحث"}
               </Button>
             )}
             {preview && (
               <div className="space-y-1.5 bg-emerald-50 border-2 border-emerald-300 rounded-lg p-3 text-sm" data-testid="qr-preview">
-                <div className="flex justify-between"><span className="text-slate-600">اسم المرسل:</span><span className="font-bold">{preview.sender_name}</span></div>
-                <div className="flex justify-between"><span className="text-slate-600">نوع المرسل:</span><span>{preview.sender_type === "pos" ? "نقطة بيع" : "عميل"}</span></div>
+                <div className="flex justify-between"><span className="text-slate-600">المرسل:</span><span className="font-bold">{preview.sender_name}</span></div>
+                <div className="flex justify-between"><span className="text-slate-600">مصدر المبلغ:</span><span className="font-bold">الصندوق</span></div>
                 <div className="border-t my-1"></div>
                 <div className="flex justify-between"><span className="text-slate-600">اسم المستلم:</span><span className="font-bold">{preview.recipient_name}</span></div>
                 <div className="flex justify-between"><span className="text-slate-600">رقم المستلم:</span><span className="font-mono">{preview.recipient_phone}</span></div>
                 <div className="flex justify-between"><span className="text-slate-600">نوع المستلم:</span><span>{preview.recipient_type === "pos" ? "نقطة بيع" : "عميل"}</span></div>
                 <div className="border-t my-1"></div>
-                <div className="flex justify-between"><span className="text-slate-600">مبلغ التحويل:</span><span className="font-bold num">{fmt(preview.amount)}</span></div>
+                <div className="flex justify-between font-bold"><span>مبلغ الشحن:</span><span className="num">{fmt(preview.amount)}</span></div>
                 <div className="flex justify-between text-emerald-700 font-bold"><span>المبلغ المستلم:</span><span className="num">{fmt(preview.recipient_credit)}</span></div>
-                {preview.commission > 0 && (
-                  <div className="flex justify-between text-amber-700"><span>عمولة نقاط البيع (10%):</span><span className="num">{fmt(preview.commission)}</span></div>
-                )}
-                <div className="flex justify-between font-black text-red-700 border-t pt-1"><span>الخصم من رصيد المرسل:</span><span className="num">{fmt(preview.sender_debit)}</span></div>
+                <div className="flex justify-between text-slate-500 text-xs"><span>العمولة:</span><span className="num">0</span></div>
+                <div className="flex justify-between font-black text-red-700 border-t pt-1"><span>الخصم من الصندوق:</span><span className="num">{fmt(preview.cash_debit)}</span></div>
               </div>
             )}
           </div>
