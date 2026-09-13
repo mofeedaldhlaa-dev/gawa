@@ -227,7 +227,6 @@ export default function PublicOrder() {
       setCats(cr.data);
       if (rememberMe) saveCredentials(phone, password);
       else clearSavedCredentials();
-      toast.success(`مرحباً ${r.data.name}`);
       loadIncentives(phone, password);
       loadOverLimitBanks();
       loadNotifs(phone, password);
