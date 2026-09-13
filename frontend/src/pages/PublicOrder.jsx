@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { fmt, fmtDate, openWhatsApp, openSMS, phoneFingerprint } from "@/lib/utils";
 import { printStatement } from "@/lib/print";
 import { printPublicOrder } from "@/lib/print";
-import { Wifi, CheckCircle, Copy, KeyRound, Phone, Ban, AlertCircle, Printer, History, Search, ContactRound, Send, MessageSquare, FileText, Gift, Landmark, Bell, Users, ArrowLeftRight } from "lucide-react";
+import { Wifi, CheckCircle, Copy, KeyRound, Phone, Ban, AlertCircle, Printer, History, Search, ContactRound, Send, MessageSquare, FileText, Gift, Landmark, Bell, Users, ArrowLeftRight, ChevronDown, ChevronUp } from "lucide-react";
 
 const ADMIN_WHATSAPP = "784225716";
 
@@ -93,6 +93,7 @@ export default function PublicOrder() {
   const [notifUnread, setNotifUnread] = useState(0);
   const [showNotifs, setShowNotifs] = useState(false);
   const [mode, setMode] = useState("card"); // "card" | "transfer"
+  const [showAccountInfo, setShowAccountInfo] = useState(false);
   const [tRecipient, setTRecipient] = useState("");
   const [tAmount, setTAmount] = useState("");
   const [tConfirm, setTConfirm] = useState(null); // preview after lookup
@@ -473,10 +474,89 @@ export default function PublicOrder() {
 
         {customer && !result && (
           <div className="space-y-3">
-            <div className="mb-4 text-center bg-gradient-to-l from-[#452480]/10 to-[#D4AF37]/20 border border-[#D4AF37]/40 rounded-xl p-3 shadow-sm" data-testid="po-welcome">
+            <div className="mb-2 text-center bg-gradient-to-l from-[#452480]/10 to-[#D4AF37]/20 border border-[#D4AF37]/40 rounded-xl p-3 shadow-sm" data-testid="po-welcome">
               <div className="text-sm text-slate-600">مرحباً بك</div>
               <div className="text-xl font-black text-[#221340] mt-1" data-testid="po-welcome-name">{customer.name}</div>
+              <button
+                type="button"
+                onClick={() => setShowAccountInfo((v) => !v)}
+                className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-[#452480] bg-white/70 hover:bg-white border border-[#452480]/30 rounded-full px-3 py-1"
+                data-testid="po-account-info-toggle"
+                aria-expanded={showAccountInfo}
+              >
+                {showAccountInfo ? <><ChevronUp size={12}/> إخفاء بيانات الحساب</> : <><ChevronDown size={12}/> بيانات الحساب</>}
+              </button>
             </div>
+
+            {showAccountInfo && (
+              <Card className="p-4 bg-white border-2 border-[#452480]/20 shadow-sm" data-testid="po-account-info">
+                <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-100">
+                  <div className="text-sm font-black text-[#221340]">بيانات الحساب</div>
+                  <span className={`text-[11px] font-bold rounded-full px-2 py-0.5 ${ctype === "pos" ? "bg-[#452480] text-white" : "bg-[#D4AF37] text-[#1A0F33]"}`} data-testid="po-account-type">
+                    {ctype === "pos" ? "نقطة بيع" : "عميل"}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 gap-2 text-sm">
+                  <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
+                    <span className="text-slate-500 text-xs">اسم الحساب</span>
+                    <span className="font-bold text-[#221340]" data-testid="po-info-name">{customer.name}</span>
+                  </div>
+                  <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
+                    <span className="text-slate-500 text-xs">رقم الهاتف</span>
+                    <span className="font-mono font-bold text-[#221340]" data-testid="po-info-phone">{customer.phone || phone}</span>
+                  </div>
+                  <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
+                    <span className="text-slate-500 text-xs">كلمة المرور</span>
+                    <button onClick={() => setShowChangePwd(true)} className="text-xs text-[#452480] hover:underline flex items-center gap-1 font-bold" data-testid="po-change-pwd">
+                      <KeyRound size={12}/> تغيير كلمة المرور
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
+                    <span className="text-slate-500 text-xs">السقف</span>
+                    <span className="num font-bold text-[#221340]" data-testid="po-info-limit">{fmt(customer.credit_limit)}</span>
+                  </div>
+                  <div className="flex items-center justify-between py-2 bg-gradient-to-l from-[#D4AF37]/5 to-[#452480]/5 rounded px-2 -mx-2">
+                    <span className="text-slate-600 text-xs font-bold">الرصيد الحالي</span>
+                    {(() => {
+                      const b = Number(customer.balance || 0);
+                      const abs = Math.abs(b);
+                      if (b > 0) return (
+                        <span className="font-black text-red-700 text-base" data-testid="po-info-balance">
+                          <span className="num">{fmt(abs)}</span> ريال <span className="text-xs">عليه</span>
+                        </span>
+                      );
+                      if (b < 0) return (
+                        <span className="font-black text-emerald-700 text-base" data-testid="po-info-balance">
+                          <span className="num">{fmt(abs)}</span> ريال <span className="text-xs">له</span>
+                        </span>
+                      );
+                      return (
+                        <span className="font-black text-slate-600 text-base" data-testid="po-info-balance">
+                          <span className="num">0</span> ريال <span className="text-xs">متعادل</span>
+                        </span>
+                      );
+                    })()}
+                  </div>
+                  <div className="flex items-center justify-between py-1.5">
+                    <span className="text-slate-500 text-xs">المتاح للطلب</span>
+                    <span className="num font-bold text-emerald-600" data-testid="po-info-available">{fmt(customer.available)}</span>
+                  </div>
+                </div>
+                <div className="mt-3 pt-3 border-t border-slate-100">
+                  <Button
+                    type="button"
+                    onClick={openStmtDialog}
+                    disabled={printingStmt}
+                    variant="outline"
+                    size="sm"
+                    className="w-full border-[#452480] text-[#452480] hover:bg-[#452480]/10 font-bold"
+                    data-testid="po-print-statement"
+                  >
+                    <FileText size={14} className="ml-1"/> طباعة كشف حساب
+                  </Button>
+                </div>
+              </Card>
+            )}
 
             <div className="grid grid-cols-2 gap-2" data-testid="po-mode-tabs">
               <button onClick={() => setMode("card")} className={`py-2 rounded-lg border font-bold text-sm ${mode==="card"?"bg-[#452480] text-white border-[#452480]":"border-slate-300"}`} data-testid="po-mode-card"><Wifi size={14} className="inline ml-1"/> شراء كرت</button>
@@ -507,73 +587,6 @@ export default function PublicOrder() {
                 )}
               </Card>
             )}
-            <Card className="p-4 bg-white border-2 border-[#452480]/20 shadow-sm" data-testid="po-account-info">
-              <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-100">
-                <div className="text-sm font-black text-[#221340]">بيانات الحساب</div>
-                <span className={`text-[11px] font-bold rounded-full px-2 py-0.5 ${ctype === "pos" ? "bg-[#452480] text-white" : "bg-[#D4AF37] text-[#1A0F33]"}`} data-testid="po-account-type">
-                  {ctype === "pos" ? "نقطة بيع" : "عميل"}
-                </span>
-              </div>
-              <div className="grid grid-cols-1 gap-2 text-sm">
-                <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                  <span className="text-slate-500 text-xs">اسم الحساب</span>
-                  <span className="font-bold text-[#221340]" data-testid="po-info-name">{customer.name}</span>
-                </div>
-                <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                  <span className="text-slate-500 text-xs">رقم الهاتف</span>
-                  <span className="font-mono font-bold text-[#221340]" data-testid="po-info-phone">{customer.phone || phone}</span>
-                </div>
-                <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                  <span className="text-slate-500 text-xs">كلمة المرور</span>
-                  <button onClick={() => setShowChangePwd(true)} className="text-xs text-[#452480] hover:underline flex items-center gap-1 font-bold" data-testid="po-change-pwd">
-                    <KeyRound size={12}/> تغيير كلمة المرور
-                  </button>
-                </div>
-                <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                  <span className="text-slate-500 text-xs">السقف</span>
-                  <span className="num font-bold text-[#221340]" data-testid="po-info-limit">{fmt(customer.credit_limit)}</span>
-                </div>
-                <div className="flex items-center justify-between py-2 bg-gradient-to-l from-[#D4AF37]/5 to-[#452480]/5 rounded px-2 -mx-2">
-                  <span className="text-slate-600 text-xs font-bold">الرصيد الحالي</span>
-                  {(() => {
-                    const b = Number(customer.balance || 0);
-                    const abs = Math.abs(b);
-                    if (b > 0) return (
-                      <span className="font-black text-red-700 text-base" data-testid="po-info-balance">
-                        <span className="num">{fmt(abs)}</span> ريال <span className="text-xs">عليه</span>
-                      </span>
-                    );
-                    if (b < 0) return (
-                      <span className="font-black text-emerald-700 text-base" data-testid="po-info-balance">
-                        <span className="num">{fmt(abs)}</span> ريال <span className="text-xs">له</span>
-                      </span>
-                    );
-                    return (
-                      <span className="font-black text-slate-600 text-base" data-testid="po-info-balance">
-                        <span className="num">0</span> ريال <span className="text-xs">متعادل</span>
-                      </span>
-                    );
-                  })()}
-                </div>
-                <div className="flex items-center justify-between py-1.5">
-                  <span className="text-slate-500 text-xs">المتاح للطلب</span>
-                  <span className="num font-bold text-emerald-600" data-testid="po-info-available">{fmt(customer.available)}</span>
-                </div>
-              </div>
-              <div className="mt-3 pt-3 border-t border-slate-100">
-                <Button
-                  type="button"
-                  onClick={openStmtDialog}
-                  disabled={printingStmt}
-                  variant="outline"
-                  size="sm"
-                  className="w-full border-[#452480] text-[#452480] hover:bg-[#452480]/10 font-bold"
-                  data-testid="po-print-statement"
-                >
-                  <FileText size={14} className="ml-1"/> طباعة كشف حساب
-                </Button>
-              </div>
-            </Card>
             {orderError && (
               <Card className="p-3 border-2 border-red-400 bg-red-50" data-testid="po-order-error">
                 <div className="text-red-800 font-bold text-sm text-center">{orderError}</div>
