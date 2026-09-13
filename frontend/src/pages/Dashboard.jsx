@@ -12,6 +12,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Label } from "@/components/ui/label";
 import { genUUID } from "@/lib/utils";
 import { SubscriberFavorites, ContactPickerButton } from "@/components/PhoneInputExtras";
+import { saveOperationImage } from "@/lib/receiptImage";
+import { Download } from "lucide-react";
 
 function QuickRechargeButton() {
   const [open, setOpen] = useState(false);
@@ -24,8 +26,9 @@ function QuickRechargeButton() {
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [lastOp, setLastOp] = useState(null);
 
-  const reset = () => { setRecipientPhone(""); setRecipientName(""); setAmount(""); setPreview(null); setLoading(false); setSubmitting(false); setShowHistory(false); setHistory([]); };
+  const reset = () => { setRecipientPhone(""); setRecipientName(""); setAmount(""); setPreview(null); setLoading(false); setSubmitting(false); setShowHistory(false); setHistory([]); setLastOp(null); };
   const onOpenChange = (v) => { if (!v) reset(); setOpen(v); };
 
   const loadHistory = async () => {
@@ -61,7 +64,9 @@ function QuickRechargeButton() {
         recipient_phone: recipientPhone.trim(), amount: preview.amount, idempotency_key: genUUID(),
       });
       toast.success(`تم الشحن بنجاح — عملية ${r.data.number}`);
-      reset(); setOpen(false);
+      setLastOp({ ...r.data, recipient_phone: recipientPhone.trim(), recipient_type: preview.recipient_type });
+      setPreview(null);
+      if (showHistory) loadHistory();
     } catch (e) { toast.error(e?.response?.data?.detail || "فشل التنفيذ"); }
     setSubmitting(false);
   };
@@ -140,7 +145,21 @@ function QuickRechargeButton() {
                           <div className="font-mono font-bold text-[#452480]">{op.number}</div>
                           <div className="text-[10px] text-slate-500">{(op.created_at || "").replace("T", " ").slice(0, 16)}</div>
                         </div>
-                        <span className="text-[10px] font-bold rounded-full px-2 py-0.5 bg-emerald-100 text-emerald-800 shrink-0">شحن</span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <Button size="sm" variant="outline" onClick={() => saveOperationImage({
+                            kind: "quick-recharge",
+                            number: op.number,
+                            createdAt: op.created_at,
+                            senderName: "شبكة جواد نت اللاسلكية",
+                            recipientName: op.party_name,
+                            amount: op.amount,
+                            recipientCredit: op.amount,
+                            description: op.description,
+                          })} className="h-7 px-2 text-xs" data-testid={`qr-history-save-${op.id}`}>
+                            <Download size={10} className="ml-1"/> حفظ
+                          </Button>
+                          <span className="text-[10px] font-bold rounded-full px-2 py-0.5 bg-emerald-100 text-emerald-800">شحن</span>
+                        </div>
                       </div>
                       <div className="mt-1 grid grid-cols-2 gap-2 text-xs">
                         <div><div className="text-slate-500">المستلم</div><div className="font-bold truncate">{op.party_name}</div></div>
@@ -160,6 +179,31 @@ function QuickRechargeButton() {
                 <ArrowLeftRight size={14} className="ml-1"/> {submitting ? "جاري..." : "تأكيد الشحن"}
               </Button>
             </DialogFooter>
+          )}
+          {lastOp && (
+            <div className="space-y-2 bg-emerald-50 border-2 border-emerald-300 rounded-lg p-3 text-sm" data-testid="qr-success">
+              <div className="text-center font-black text-emerald-800">تمت العملية بنجاح</div>
+              <div className="flex justify-between text-xs"><span className="text-slate-600">رقم العملية:</span><span className="font-mono font-bold">{lastOp.number}</span></div>
+              <div className="flex justify-between text-xs"><span className="text-slate-600">المستلم:</span><span className="font-bold">{lastOp.party_name}</span></div>
+              <div className="flex justify-between text-xs"><span className="text-slate-600">المبلغ:</span><span className="font-bold num">{fmt(lastOp.amount)}</span></div>
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <Button size="sm" onClick={() => saveOperationImage({
+                  kind: "quick-recharge",
+                  number: lastOp.number,
+                  createdAt: lastOp.created_at,
+                  senderName: "شبكة جواد نت اللاسلكية",
+                  recipientName: lastOp.party_name,
+                  recipientPhone: lastOp.recipient_phone,
+                  recipientType: lastOp.recipient_type,
+                  amount: lastOp.amount,
+                  recipientCredit: lastOp.amount,
+                  description: lastOp.description,
+                })} className="bg-[#452480] hover:bg-[#5A2FA0]" data-testid="qr-save-image">
+                  <Download size={12} className="ml-1"/> حفظ الإشعار كصورة
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setLastOp(null)} data-testid="qr-new">عملية جديدة</Button>
+              </div>
+            </div>
           )}
         </DialogContent>
       </Dialog>

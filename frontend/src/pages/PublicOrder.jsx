@@ -12,6 +12,8 @@ import { printStatement } from "@/lib/print";
 import { printPublicOrder } from "@/lib/print";
 import { Wifi, CheckCircle, Copy, KeyRound, Phone, Ban, AlertCircle, Printer, History, Search, ContactRound, Send, MessageSquare, FileText, Gift, Landmark, Bell, Users, ArrowLeftRight, ChevronDown, ChevronUp } from "lucide-react";
 import { SubscriberFavorites, ContactPickerButton } from "@/components/PhoneInputExtras";
+import { saveOperationImage } from "@/lib/receiptImage";
+import { Download } from "lucide-react";
 
 const ADMIN_WHATSAPP = "784225716";
 
@@ -101,6 +103,7 @@ export default function PublicOrder() {
   const [tRecipient, setTRecipient] = useState("");
   const [tAmount, setTAmount] = useState("");
   const [tConfirm, setTConfirm] = useState(null); // preview after lookup
+  const [tLastOp, setTLastOp] = useState(null); // last successful transfer for image download
 
   const loadNotifs = async (ph, pw) => {
     try {
@@ -135,6 +138,7 @@ export default function PublicOrder() {
     try {
       const r = await api.post("/public/card-order/transfer/confirm", { phone, password, recipient_phone: tRecipient, amount: Number(tAmount), idempotency_key: tConfirm.key });
       toast.success(`تم التحويل بنجاح — رقم العملية ${r.data.number}`);
+      setTLastOp(r.data);
       setTConfirm(null); setTRecipient(""); setTAmount("");
       try { const rc = await api.post("/public/card-order/login", { phone, password, device_id: phoneFingerprint() }); setCustomer(rc.data); } catch {}
       loadNotifs();
@@ -594,7 +598,32 @@ export default function PublicOrder() {
                   </div>
                 </div>
                 <div><Label>المبلغ</Label><Input type="number" inputMode="decimal" value={tAmount} onChange={(e) => { setTAmount(e.target.value); setTConfirm(null); }} data-testid="po-t-amount"/></div>
-                {!tConfirm && <Button onClick={doTransferLookup} className="w-full bg-[#452480]" data-testid="po-t-lookup">موافقة</Button>}
+                {!tConfirm && !tLastOp && <Button onClick={doTransferLookup} className="w-full bg-[#452480]" data-testid="po-t-lookup">موافقة</Button>}
+                {tLastOp && !tConfirm && (
+                  <div className="space-y-2 bg-emerald-50 border-2 border-emerald-300 rounded p-3 text-sm" data-testid="po-t-success">
+                    <div className="text-center font-black text-emerald-800">تم التحويل بنجاح</div>
+                    <div className="flex justify-between text-xs"><span className="text-slate-600">رقم العملية:</span><span className="font-mono font-bold">{tLastOp.number}</span></div>
+                    <div className="flex justify-between text-xs"><span className="text-slate-600">المستلم:</span><span className="font-bold">{tLastOp.recipient_name}</span></div>
+                    <div className="flex justify-between text-xs"><span className="text-slate-600">المبلغ:</span><span className="font-bold num">{fmt(tLastOp.amount)}</span></div>
+                    <div className="grid grid-cols-2 gap-1 pt-1">
+                      <Button size="sm" onClick={() => saveOperationImage({
+                        kind: "transfer",
+                        number: tLastOp.number,
+                        createdAt: tLastOp.created_at,
+                        senderName: customer?.name || "",
+                        recipientName: tLastOp.recipient_name,
+                        recipientPhone: tLastOp.recipient_phone,
+                        amount: tLastOp.amount,
+                        commission: tLastOp.commission || 0,
+                        senderDebit: tLastOp.sender_debit,
+                        recipientCredit: tLastOp.amount,
+                      })} className="bg-[#452480] hover:bg-[#5A2FA0]" data-testid="po-t-save-image">
+                        <Download size={12} className="ml-1"/> حفظ الإشعار كصورة
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => setTLastOp(null)} data-testid="po-t-new">عملية جديدة</Button>
+                    </div>
+                  </div>
+                )}
                 {tConfirm && (
                   <div className="space-y-2 bg-emerald-50 border border-emerald-300 rounded p-2 text-sm" data-testid="po-t-confirm-card">
                     <div className="flex justify-between"><span>اسم المشترك:</span><span className="font-bold">{tConfirm.recipient_name}</span></div>
@@ -638,7 +667,23 @@ export default function PublicOrder() {
                               <div className="font-mono font-bold text-[#452480]">{t.number}</div>
                               <div className="text-xs text-slate-500">{fmtDate(t.created_at)}</div>
                             </div>
-                            <span className="text-[10px] font-bold rounded-full px-2 py-0.5 bg-[#452480]/10 text-[#452480]">تحويل</span>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <Button size="sm" variant="outline" onClick={() => saveOperationImage({
+                                kind: "transfer",
+                                number: t.number,
+                                createdAt: t.created_at,
+                                senderName: customer?.name || "",
+                                recipientName: t.recipient_name,
+                                recipientPhone: t.recipient_phone,
+                                amount: t.amount,
+                                commission: t.commission || 0,
+                                senderDebit: t.sender_debit,
+                                recipientCredit: t.amount,
+                              })} className="h-7 px-2 text-xs" data-testid={`po-transfer-save-${t.id}`}>
+                                <Download size={10} className="ml-1"/> حفظ
+                              </Button>
+                              <span className="text-[10px] font-bold rounded-full px-2 py-0.5 bg-[#452480]/10 text-[#452480]">تحويل</span>
+                            </div>
                           </div>
                           <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
                             <div><div className="text-slate-500">المستلم</div><div className="font-bold truncate">{t.recipient_name || "-"}</div></div>
@@ -751,7 +796,8 @@ export default function PublicOrder() {
             </>
             )}
 
-            {/* Previous orders section */}
+            {/* Previous orders section — visible only in card-buying mode */}
+            {mode === "card" && (
             <div className="pt-3 border-t">
               <button type="button" onClick={() => setShowHistory((v) => !v)} className="w-full flex items-center justify-between text-sm font-bold text-[#221340]" data-testid="po-history-toggle">
                 <span className="flex items-center gap-2"><History size={16}/> الطلبات السابقة</span>
@@ -810,6 +856,7 @@ export default function PublicOrder() {
                 </div>
               )}
             </div>
+            )}
           </div>
         )}
 
