@@ -203,6 +203,8 @@ function InstallAppPanel() {
   const [raw, setRaw] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [installedFlag, setInstalledFlag] = useState(false);
+  const [updating, setUpdating] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -211,10 +213,18 @@ function InstallAppPanel() {
       setAllowed(list);
       setRaw(list.join("\n"));
     }).finally(() => setLoading(false));
+    try { setInstalledFlag(!!localStorage.getItem("gwd_admin_pwa_installed")); } catch {}
+    const onInstalled = () => {
+      try { localStorage.setItem("gwd_admin_pwa_installed", String(Date.now())); } catch {}
+      setInstalledFlag(true);
+    };
+    window.addEventListener("appinstalled", onInstalled);
+    return () => window.removeEventListener("appinstalled", onInstalled);
   }, []);
 
   const meAllowed = user?.email && allowed.map((e) => e.toLowerCase()).includes(user.email.toLowerCase());
   const isSuperAdmin = user?.role === "admin";
+  const isInstalled = installed || installedFlag;
 
   const save = async () => {
     const list = raw
@@ -232,13 +242,42 @@ function InstallAppPanel() {
 
   const doInstall = async () => {
     if (!meAllowed) { toast.error("هذا الإيميل غير مسموح له بتثبيت تطبيق الإدارة"); return; }
-    if (installed) { toast.info("التطبيق مثبَّت مسبقاً على هذا الجهاز"); return; }
     if (!canInstall) {
       toast.error("المتصفح لم يعرض خيار التثبيت بعد. افتح التطبيق مرة أخرى بعد ثوانٍ، أو استخدم قائمة المتصفح: تثبيت التطبيق.");
       return;
     }
     const outcome = await promptInstall();
-    if (outcome === "accepted") toast.success("تم بدء التثبيت");
+    if (outcome === "accepted") {
+      try { localStorage.setItem("gwd_admin_pwa_installed", String(Date.now())); } catch {}
+      setInstalledFlag(true);
+      toast.success("تم بدء التثبيت");
+    }
+  };
+
+  const doUpdate = async () => {
+    setUpdating(true);
+    try {
+      if ("serviceWorker" in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map((r) => r.update().catch(() => {})));
+      }
+      if ("caches" in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.filter((k) => !k.startsWith("jawad-")).map((k) => caches.delete(k)));
+      }
+      toast.success("جارٍ تحميل أحدث نسخة...");
+      setTimeout(() => window.location.reload(true), 700);
+    } catch (e) {
+      toast.error("تعذّر التحقق من التحديث");
+      setUpdating(false);
+    }
+  };
+
+  const resetInstall = () => {
+    if (!window.confirm("إعادة تفعيل زر التثبيت — يستخدم فقط لو أُلغي التطبيق من الجهاز. متابعة؟")) return;
+    try { localStorage.removeItem("gwd_admin_pwa_installed"); } catch {}
+    setInstalledFlag(false);
+    toast.info("تم إعادة تفعيل زر التثبيت");
   };
 
   return (
@@ -248,24 +287,51 @@ function InstallAppPanel() {
           <Smartphone size={20}/>
         </div>
         <div className="flex-1 text-sm">
-          <div className="font-bold text-[#221340]">تطبيق الإدارة (MOF30)</div>
+          <div className="font-bold text-[#221340]">إدارة الحسابات (MOF30)</div>
           <div className="text-xs text-slate-600 mt-1 leading-relaxed">
-            ثبّت لوحة الإدارة كتطبيق مستقل على شاشة الجهاز (يفتح مباشرة على النطاق <span dir="ltr" className="font-mono">/mof30</span>). التثبيت مسموح فقط للإيميلات المضافة أدناه.
+            ثبّت لوحة الإدارة كتطبيق مستقل على شاشة الجهاز (يفتح مباشرة على النطاق <span dir="ltr" className="font-mono">/mof30</span>). التثبيت مسموح فقط للإيميلات المضافة أدناه، ومسموح <b>مرة واحدة</b> — بعدها يظهر زر «تحديث التطبيق».
           </div>
           <div className="mt-2 flex items-center gap-2 flex-wrap">
-            <Button
-              onClick={doInstall}
-              disabled={loading || !meAllowed || installed}
-              className="bg-[#452480] hover:bg-[#5A2FA0] text-white"
-              data-testid="install-admin-btn"
-            >
-              <Download size={14} className="ml-1"/>
-              {installed ? "مثبَّت بالفعل" : (meAllowed ? "تثبيت تطبيق الإدارة" : "غير مسموح لك بالتثبيت")}
-            </Button>
-            <span className="text-[11px] text-slate-500">
-              حالتك: {user?.email ? <span className="font-mono" dir="ltr">{user.email}</span> : "لا يوجد بريد لحسابك"} —
-              {meAllowed ? <span className="text-emerald-700 font-bold"> مسموح</span> : <span className="text-red-700 font-bold"> غير مسموح</span>}
-            </span>
+            {isInstalled ? (
+              <>
+                <Button
+                  onClick={doUpdate}
+                  disabled={updating}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                  data-testid="update-admin-btn"
+                >
+                  <RotateCcw size={14} className="ml-1"/>
+                  {updating ? "جاري التحديث..." : "تحديث التطبيق"}
+                </Button>
+                <span className="text-[11px] px-2 py-1 rounded-full bg-emerald-100 text-emerald-800 font-bold">التطبيق مثبَّت مسبقاً</span>
+                {isSuperAdmin && (
+                  <button
+                    type="button"
+                    onClick={resetInstall}
+                    className="text-[11px] text-slate-500 hover:text-red-600 hover:underline"
+                    data-testid="reset-install-flag"
+                  >
+                    إعادة تفعيل زر التثبيت
+                  </button>
+                )}
+              </>
+            ) : (
+              <>
+                <Button
+                  onClick={doInstall}
+                  disabled={loading || !meAllowed}
+                  className="bg-[#452480] hover:bg-[#5A2FA0] text-white"
+                  data-testid="install-admin-btn"
+                >
+                  <Download size={14} className="ml-1"/>
+                  {meAllowed ? "تثبيت تطبيق الإدارة" : "غير مسموح لك بالتثبيت"}
+                </Button>
+                <span className="text-[11px] text-slate-500">
+                  حالتك: {user?.email ? <span className="font-mono" dir="ltr">{user.email}</span> : "لا يوجد بريد لحسابك"} —
+                  {meAllowed ? <span className="text-emerald-700 font-bold"> مسموح</span> : <span className="text-red-700 font-bold"> غير مسموح</span>}
+                </span>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -477,7 +543,7 @@ export default function SettingsPage() {
       </Card>
 
       <Card className="p-6 space-y-4" data-testid="install-card">
-        <div className="text-lg font-bold text-[#221340] flex items-center gap-2"><Smartphone size={20}/> تثبيت تطبيق الإدارة</div>
+        <div className="text-lg font-bold text-[#221340] flex items-center gap-2"><Smartphone size={20}/> تثبيت / تحديث «إدارة الحسابات»</div>
         <InstallAppPanel/>
       </Card>
 

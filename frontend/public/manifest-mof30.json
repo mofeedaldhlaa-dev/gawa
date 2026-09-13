@@ -1,7 +1,7 @@
 {
-  "name": "GAWAD ADMIN",
-  "short_name": "MOF30",
-  "description": "لوحة إدارة شبكة جواد نت",
+  "name": "إدارة الحسابات",
+  "short_name": "إدارة الحسابات",
+  "description": "لوحة إدارة شبكة جواد نت اللاسلكية",
   "start_url": "/mof30",
   "scope": "/mof30",
   "display": "standalone",
