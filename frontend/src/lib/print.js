@@ -255,9 +255,7 @@ export const printStatement = ({ customer, entries, username, rangeTitle }) => {
       <div class="info-row"><span class="lbl">اسم الحساب</span><span class="val">${customer.name}</span></div>
       <div class="info-row"><span class="lbl">نوع الحساب</span><span class="val">${(customer.customer_type || "customer") === "pos" ? "نقطة بيع" : "عميل"}</span></div>
       <div class="info-row"><span class="lbl">رقم الهاتف</span><span class="val">${customer.phone || "-"}</span></div>
-      <div class="info-row"><span class="lbl">السقف</span><span class="val">${fmt(customer.credit_limit)}</span></div>
-      <div class="info-row"><span class="lbl">الرصيد الحالي</span><span class="val">${fmt(customer.balance)}</span></div>
-      <div class="info-row"><span class="lbl">المتاح</span><span class="val">${fmt(Math.max(0, (customer.credit_limit||0) - (customer.balance||0)))}</span></div>
+      <div class="info-row"><span class="lbl">الرصيد الحالي</span><span class="val">${fmt(Math.abs(customer.balance||0))} ${(customer.balance||0) > 0 ? "عليكم" : (customer.balance||0) < 0 ? "لكم" : "متعادل"}</span></div>
     </div>
     <table>
       <thead><tr>
@@ -273,7 +271,7 @@ export const printStatement = ({ customer, entries, username, rangeTitle }) => {
     <div class="totals">
       <div class="row"><span>إجمالي المدين</span><span class="num">${fmt(totalDebit)}</span></div>
       <div class="row"><span>إجمالي الدائن</span><span class="num">${fmt(totalCredit)}</span></div>
-      <div class="row grand"><span>الرصيد النهائي</span><span class="num">${fmt(customer.balance)}</span></div>
+      <div class="row grand"><span>الرصيد النهائي</span><span class="num">${fmt(Math.abs(customer.balance||0))} ${(customer.balance||0) > 0 ? "عليكم" : (customer.balance||0) < 0 ? "لكم" : "متعادل"}</span></div>
     </div>
     ${buildFooter(username)}
   `;

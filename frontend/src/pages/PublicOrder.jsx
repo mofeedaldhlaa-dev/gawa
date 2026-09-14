@@ -535,7 +535,7 @@ export default function PublicOrder() {
                     {ctype === "pos" ? "نقطة بيع" : "عميل"}
                   </span>
                 </div>
-                <div className="grid grid-cols-1 gap-2 text-sm">
+                <div class="grid grid-cols-1 gap-2 text-sm">
                   <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
                     <span className="text-slate-500 text-xs">اسم الحساب</span>
                     <span className="font-bold text-[#221340]" data-testid="po-info-name">{customer.name}</span>
@@ -550,10 +550,6 @@ export default function PublicOrder() {
                       <KeyRound size={12}/> تغيير كلمة المرور
                     </button>
                   </div>
-                  <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                    <span className="text-slate-500 text-xs">السقف</span>
-                    <span className="num font-bold text-[#221340]" data-testid="po-info-limit">{fmt(customer.credit_limit)}</span>
-                  </div>
                   <div className="flex items-center justify-between py-2 bg-gradient-to-l from-[#D4AF37]/5 to-[#452480]/5 rounded px-2 -mx-2">
                     <span className="text-slate-600 text-xs font-bold">الرصيد الحالي</span>
                     {(() => {
@@ -561,12 +557,12 @@ export default function PublicOrder() {
                       const abs = Math.abs(b);
                       if (b > 0) return (
                         <span className="font-black text-red-700 text-base" data-testid="po-info-balance">
-                          <span className="num">{fmt(abs)}</span> ريال <span className="text-xs">عليه</span>
+                          <span className="num">{fmt(abs)}</span> ريال <span className="text-xs">عليكم</span>
                         </span>
                       );
                       if (b < 0) return (
                         <span className="font-black text-emerald-700 text-base" data-testid="po-info-balance">
-                          <span className="num">{fmt(abs)}</span> ريال <span className="text-xs">له</span>
+                          <span className="num">{fmt(abs)}</span> ريال <span className="text-xs">لكم</span>
                         </span>
                       );
                       return (
@@ -575,10 +571,6 @@ export default function PublicOrder() {
                         </span>
                       );
                     })()}
-                  </div>
-                  <div className="flex items-center justify-between py-1.5">
-                    <span className="text-slate-500 text-xs">المتاح للطلب</span>
-                    <span className="num font-bold text-emerald-600" data-testid="po-info-available">{fmt(customer.available)}</span>
                   </div>
                 </div>
                 <div className="mt-3 pt-3 border-t border-slate-100">
