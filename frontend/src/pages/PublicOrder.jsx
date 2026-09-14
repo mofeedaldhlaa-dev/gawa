@@ -567,7 +567,7 @@ export default function PublicOrder() {
                       );
                       return (
                         <span className="font-black text-slate-600 text-base" data-testid="po-info-balance">
-                          <span className="num">0</span> ريال <span className="text-xs">متعادل</span>
+                          <span className="num">0</span> ريال
                         </span>
                       );
                     })()}
