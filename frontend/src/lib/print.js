@@ -193,6 +193,7 @@ export const printPurchase = ({ purchase, supplier, username, banks }) => {
     <div class="title">فاتورة مشتريات — ${purchase.number}</div>
     <div class="info-grid">
       <div class="info-row"><span class="lbl">التاريخ</span><span class="val">${fmtDate(purchase.created_at)}</span></div>
+      <div class="info-row"><span class="lbl">نوع الفاتورة</span><span class="val">${purchase.purchase_type === "cash" ? "نقد" : "آجل"}</span></div>
       <div class="info-row"><span class="lbl">المورد</span><span class="val">${purchase.supplier_name || "-"}</span></div>
       <div class="info-row"><span class="lbl">رقم الهاتف</span><span class="val">${supplier?.phone || "-"}</span></div>
       <div class="info-row"><span class="lbl">المستخدم</span><span class="val">${purchase.username || "-"}</span></div>

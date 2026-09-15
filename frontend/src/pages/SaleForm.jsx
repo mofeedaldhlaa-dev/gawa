@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import api, { errText } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,8 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { fmt, openWhatsApp, buildInvoiceMessage, genUUID, deviceId } from "@/lib/utils";
-import { Plus, Trash2, Save, MessageCircle } from "lucide-react";
+import { fmt, genUUID, deviceId } from "@/lib/utils";
+import { Plus, Trash2, Save } from "lucide-react";
 import { queueOperation, isOnline } from "@/lib/offline";
 
 export default function SaleForm() {
@@ -28,16 +28,14 @@ export default function SaleForm() {
   const [discount, setDiscount] = useState(0);
   const [paid, setPaid] = useState(0);
   const [notes, setNotes] = useState("");
-  const [saved, setSaved] = useState(null);
   const [loading, setLoading] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [origNumber, setOrigNumber] = useState("");
-  const [settings, setSettings] = useState({ company_name: "شبكة جواد نت اللاسلكية" });
+  const requestKey = useRef(genUUID());
 
   useEffect(() => {
     api.get("/categories").then((r) => setCats(r.data));
     api.get("/customers").then((r) => setCustomers(r.data));
-    api.get("/settings").then((r) => setSettings(r.data));
   }, []);
 
   // Prefill customer from URL when adding a new invoice from within account details
@@ -90,7 +88,8 @@ export default function SaleForm() {
 
   const subtotal = items.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.price) || 0), 0);
   const total = subtotal - (Number(discount) || 0);
-  const remaining = total - (Number(paid) || 0);
+  const effectivePaid = saleType === "cash" ? total : Math.min(Math.max(Number(paid) || 0, 0), total);
+  const remaining = saleType === "cash" ? 0 : Math.max(total - effectivePaid, 0);
   const customer = customers.find((c) => c.id === customerId);
 
   const payload = () => ({
@@ -103,7 +102,7 @@ export default function SaleForm() {
       use_numbered: i.use_numbered,
       card_numbers: i.use_numbered ? (i.card_numbers_text || "").split(/\s+/).filter(Boolean) : [],
     })),
-    discount: Number(discount) || 0, paid: Number(paid) || 0, notes,
+    discount: Number(discount) || 0, paid: effectivePaid, notes,
   });
 
   const validate = () => {
@@ -116,15 +115,14 @@ export default function SaleForm() {
   const submitCreate = async () => {
     setLoading(true);
     try {
-      const body = { ...payload(), idempotency_key: genUUID(), device_id: deviceId() };
+      const body = { ...payload(), idempotency_key: requestKey.current, device_id: deviceId() };
       if (!isOnline()) {
         await queueOperation({ endpoint: "/sales", payload: body });
         toast.success("تم حفظ الفاتورة محلياً - ستتم المزامنة عند الاتصال");
         nav("/sales"); return;
       }
       const r = await api.post("/sales", body);
-      setSaved(r.data);
-      toast.success(`تم حفظ الفاتورة ${r.data.number}`);
+      nav("/sales", { state: { savedInvoice: { ...r.data, account_phone: customer?.phone || "" } } });
     } catch (e) { toast.error(errText(e)); }
     setLoading(false);
   };
@@ -133,9 +131,8 @@ export default function SaleForm() {
     setConfirmOpen(false);
     setLoading(true);
     try {
-      await api.put(`/sales/${editId}`, payload());
-      toast.success(`تم تعديل الفاتورة ${origNumber}`);
-      nav("/sales");
+      const r = await api.put(`/sales/${editId}`, payload());
+      nav("/sales", { state: { savedInvoice: { ...r.data, account_phone: customer?.phone || "" } } });
     } catch (e) { toast.error(errText(e)); }
     setLoading(false);
   };
@@ -144,18 +141,6 @@ export default function SaleForm() {
     if (!validate()) return;
     if (isEdit) setConfirmOpen(true);
     else submitCreate();
-  };
-
-  const sendWhatsApp = () => {
-    if (!saved || !customer?.phone) { toast.error("لا يوجد رقم هاتف"); return; }
-    const details = saved.items.map((i) => `${i.category_name} × ${i.quantity} = ${fmt(i.total)}`).join("\n");
-    const msg = buildInvoiceMessage({
-      company: settings.company_name, number: saved.number, kind: "مبيعات",
-      details, amount: saved.subtotal, discount: saved.discount,
-      total: saved.total, paid: saved.paid, remaining: saved.remaining,
-      balance_after: saved.balance_after,
-    });
-    openWhatsApp(customer.phone, msg);
   };
 
   return (
@@ -177,7 +162,7 @@ export default function SaleForm() {
           </div>
           <div>
             <Label>نوع الفاتورة *</Label>
-            <Select value={saleType} onValueChange={setSaleType}>
+            <Select value={saleType} onValueChange={(value) => { setSaleType(value); if (value === "cash") setPaid(0); }}>
               <SelectTrigger data-testid="sale-type"><SelectValue placeholder="اختر النوع" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="cash">نقد</SelectItem>
@@ -213,16 +198,14 @@ export default function SaleForm() {
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div><Label>الخصم</Label><Input type="number" value={discount} onChange={(e) => setDiscount(e.target.value)} data-testid="sale-discount" /></div>
-          <div><Label>المدفوع</Label><Input type="number" value={paid} onChange={(e) => setPaid(e.target.value)} data-testid="sale-paid" /></div>
+          <div><Label>المدفوع</Label><Input type="number" value={saleType === "cash" ? total : paid} onChange={(e) => setPaid(e.target.value)} disabled={saleType === "cash"} data-testid="sale-paid" /></div>
           <div><Label>الإجمالي</Label><div className="h-10 flex items-center px-3 bg-slate-100 rounded num font-bold">{fmt(total)}</div></div>
           <div><Label>المتبقي</Label><div className="h-10 flex items-center px-3 bg-slate-100 rounded num font-bold">{fmt(remaining)}</div></div>
         </div>
         <Textarea placeholder="ملاحظات" value={notes} onChange={(e) => setNotes(e.target.value)} />
         <div className="flex gap-2 flex-wrap">
           <Button onClick={submit} disabled={loading} className="bg-[#221340] w-full sm:w-auto" data-testid="sale-save"><Save size={16} className="ml-1"/> {loading ? "جاري..." : (isEdit ? "حفظ التعديل" : "حفظ الفاتورة")}</Button>
-          {saved && <Button onClick={sendWhatsApp} variant="outline" className="border-green-600 text-green-700 w-full sm:w-auto" data-testid="sale-wa"><MessageCircle size={16} className="ml-1"/> إرسال واتساب</Button>}
         </div>
-        {saved && <div className="p-3 bg-green-50 border border-green-200 rounded" data-testid="sale-success">تم إنشاء الفاتورة <span className="font-mono font-bold">{saved.number}</span></div>}
       </Card>
 
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>

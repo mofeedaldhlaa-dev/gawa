@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import api, { errText } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,7 @@ export default function PurchaseForm() {
   const [cats, setCats] = useState([]);
   const [sups, setSups] = useState([]);
   const [supplierId, setSupplierId] = useState("");
+  const [purchaseType, setPurchaseType] = useState("");
   const [items, setItems] = useState([{ category_id: "", quantity: 1, price: 0, use_numbered: false, card_numbers_text: "" }]);
   const [discount, setDiscount] = useState(0);
   const [paid, setPaid] = useState(0);
@@ -27,6 +28,7 @@ export default function PurchaseForm() {
   const [loading, setLoading] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [origNumber, setOrigNumber] = useState("");
+  const requestKey = useRef(genUUID());
 
   useEffect(() => {
     api.get("/categories").then((r) => setCats(r.data));
@@ -39,6 +41,7 @@ export default function PurchaseForm() {
       const p = r.data;
       setOrigNumber(p.number || "");
       setSupplierId(p.supplier_id || "");
+      setPurchaseType(p.purchase_type || "credit");
       setDiscount(p.discount || 0);
       setPaid(p.paid || 0);
       setNotes(p.notes || "");
@@ -61,9 +64,11 @@ export default function PurchaseForm() {
     return s + q * (Number(i.price) || 0);
   }, 0);
   const total = subtotal - (Number(discount) || 0);
+  const effectivePaid = purchaseType === "cash" ? total : Math.min(Math.max(Number(paid) || 0, 0), total);
+  const remaining = purchaseType === "cash" ? 0 : Math.max(total - effectivePaid, 0);
+  const supplier = sups.find((s) => s.id === supplierId);
 
   const payload = () => {
-    const supplier = sups.find((s) => s.id === supplierId);
     const finalItems = items.map((i) => {
       const nums = (i.card_numbers_text || "").split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
       const q = i.use_numbered ? nums.length : Number(i.quantity);
@@ -75,15 +80,16 @@ export default function PurchaseForm() {
     });
     return {
       supplier_id: supplierId || null, supplier_name: supplier?.name || "",
-      items: finalItems, discount: Number(discount) || 0, paid: Number(paid) || 0, notes,
+      purchase_type: purchaseType,
+      items: finalItems, discount: Number(discount) || 0, paid: effectivePaid, notes,
     };
   };
 
   const submitCreate = async () => {
     setLoading(true);
     try {
-      await api.post("/purchases", { ...payload(), idempotency_key: genUUID(), device_id: deviceId() });
-      toast.success("تم الحفظ"); nav("/purchases");
+      const r = await api.post("/purchases", { ...payload(), idempotency_key: requestKey.current, device_id: deviceId() });
+      nav("/purchases", { state: { savedInvoice: { ...r.data, account_phone: supplier?.phone || "" } } });
     } catch (e) { toast.error(errText(e)); }
     setLoading(false);
   };
@@ -91,12 +97,13 @@ export default function PurchaseForm() {
     setConfirmOpen(false);
     setLoading(true);
     try {
-      await api.put(`/purchases/${editId}`, payload());
-      toast.success(`تم تعديل الفاتورة ${origNumber}`); nav("/purchases");
+      const r = await api.put(`/purchases/${editId}`, payload());
+      nav("/purchases", { state: { savedInvoice: { ...r.data, account_phone: supplier?.phone || "" } } });
     } catch (e) { toast.error(errText(e)); }
     setLoading(false);
   };
   const submit = () => {
+    if (!purchaseType) { toast.error("يرجى اختيار نوع الفاتورة: نقد أو آجل."); return; }
     if (items.some((i) => !i.category_id)) { toast.error("أكمل بيانات الأصناف"); return; }
     if (isEdit) setConfirmOpen(true);
     else submitCreate();
@@ -109,12 +116,24 @@ export default function PurchaseForm() {
           وضع التعديل — فاتورة مشتريات رقم <span className="font-mono font-bold text-[#452480]" data-testid="purch-edit-number">{origNumber}</span>
         </div>
       )}
-      <div>
-        <Label>المورد</Label>
-        <Select value={supplierId} onValueChange={setSupplierId}>
-          <SelectTrigger data-testid="purch-supplier"><SelectValue placeholder="اختر المورد" /></SelectTrigger>
-          <SelectContent>{sups.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
-        </Select>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div>
+          <Label>المورد</Label>
+          <Select value={supplierId} onValueChange={setSupplierId}>
+            <SelectTrigger data-testid="purch-supplier"><SelectValue placeholder="اختر المورد" /></SelectTrigger>
+            <SelectContent>{sups.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
+          </Select>
+        </div>
+        <div>
+          <Label>نوع الفاتورة *</Label>
+          <Select value={purchaseType} onValueChange={(value) => { setPurchaseType(value); if (value === "cash") setPaid(0); }}>
+            <SelectTrigger data-testid="purch-type"><SelectValue placeholder="اختر النوع" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="cash">نقد</SelectItem>
+              <SelectItem value="credit">آجل</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
       <div className="space-y-2">
         <div className="flex justify-between"><div className="font-bold">الأصناف</div><Button size="sm" onClick={() => setItems([...items, { category_id: "", quantity: 1, price: 0, use_numbered: false, card_numbers_text: "" }])}><Plus size={14}/></Button></div>
@@ -141,9 +160,9 @@ export default function PurchaseForm() {
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div><Label>الخصم</Label><Input type="number" value={discount} onChange={(e) => setDiscount(e.target.value)}/></div>
-        <div><Label>المدفوع</Label><Input type="number" value={paid} onChange={(e) => setPaid(e.target.value)}/></div>
+        <div><Label>المدفوع</Label><Input type="number" value={purchaseType === "cash" ? total : paid} onChange={(e) => setPaid(e.target.value)} disabled={purchaseType === "cash"}/></div>
         <div><Label>الإجمالي</Label><div className="h-10 flex items-center px-3 bg-slate-100 rounded num font-bold">{fmt(total)}</div></div>
-        <div><Label>المتبقي</Label><div className="h-10 flex items-center px-3 bg-slate-100 rounded num font-bold">{fmt(total - paid)}</div></div>
+        <div><Label>المتبقي</Label><div className="h-10 flex items-center px-3 bg-slate-100 rounded num font-bold">{fmt(remaining)}</div></div>
       </div>
       <Textarea placeholder="ملاحظات" value={notes} onChange={(e) => setNotes(e.target.value)}/>
       <Button onClick={submit} disabled={loading} className="bg-[#221340] w-full sm:w-auto" data-testid="purch-save"><Save size={16} className="ml-1"/> {loading ? "جاري..." : (isEdit ? "حفظ التعديل" : "حفظ")}</Button>

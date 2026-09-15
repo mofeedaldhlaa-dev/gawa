@@ -28,6 +28,7 @@ from fastapi.responses import Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import ReturnDocument
 from pydantic import BaseModel, Field, ConfigDict
 
 # ================= CONFIG =================
@@ -408,6 +409,7 @@ class SaleIn(BaseModel):
 class PurchaseIn(BaseModel):
     supplier_id: Optional[str] = None
     supplier_name: Optional[str] = ""
+    purchase_type: str = "credit"  # cash / credit
     items: List[SaleItemIn]
     discount: float = 0
     paid: float = 0
@@ -1164,10 +1166,14 @@ async def stock_report(user=Depends(require_perm("stock"))):
 async def _adjust_party_balance(party_type: str, party_id: str, amount: float, op_number: str, description: str):
     """Positive amount = increase debt to us (sale). Negative = decrease debt (receipt)."""
     collection = db.customers if party_type == "customer" else db.suppliers
-    doc = await collection.find_one({"id": party_id})
-    if not doc: return None
-    new_balance = doc.get("balance", 0) + amount
-    await collection.update_one({"id": party_id}, {"$set": {"balance": new_balance}})
+    updated = await collection.find_one_and_update(
+        {"id": party_id},
+        {"$inc": {"balance": float(amount)}},
+        return_document=ReturnDocument.AFTER,
+    )
+    if not updated:
+        return None
+    new_balance = float(updated.get("balance", 0) or 0)
     await db.ledger.insert_one({
         "id": str(uuid.uuid4()),
         "party_type": party_type, "party_id": party_id,
@@ -1190,10 +1196,51 @@ async def _remove_ledger_by_op(party_type: str, party_id: str, op_number: str):
     if entries:
         await db.ledger.delete_many({"party_type": party_type, "party_id": party_id, "op_number": op_number})
     collection = db.customers if party_type == "customer" else db.suppliers
-    doc = await collection.find_one({"id": party_id})
-    if doc:
-        await collection.update_one({"id": party_id}, {"$set": {"balance": float(doc.get("balance", 0) or 0) - delta}})
+    if delta:
+        await collection.update_one({"id": party_id}, {"$inc": {"balance": -delta}})
     return delta
+
+
+async def _validate_sale_inventory(items: list, old_items: Optional[list] = None):
+    """Validate the complete sale before mutating stock; old items are treated as releasable on edit."""
+    old_items = old_items or []
+    old_numbered = set()
+    old_numbered_by_cat: Dict[str, int] = {}
+    old_qty_by_cat: Dict[str, int] = {}
+    for item in old_items:
+        cat_id = item.get("category_id")
+        numbers = set(item.get("card_numbers") or [])
+        old_numbered.update(numbers)
+        old_numbered_by_cat[cat_id] = old_numbered_by_cat.get(cat_id, 0) + len(numbers)
+        residual = max(int(item.get("quantity", 0) or 0) - len(numbers), 0)
+        old_qty_by_cat[cat_id] = old_qty_by_cat.get(cat_id, 0) + residual
+
+    reserved_numbers = set()
+    reserved_by_cat: Dict[str, int] = {}
+    quantity_by_cat: Dict[str, int] = {}
+    for item in items:
+        if item.use_numbered and item.card_numbers:
+            for number in item.card_numbers:
+                if number in reserved_numbers:
+                    raise HTTPException(status_code=400, detail=f"الكرت {number} مكرر في الفاتورة")
+                card = await db.cards.find_one({"number": number})
+                if not card or (card.get("status") != "available" and number not in old_numbered):
+                    raise HTTPException(status_code=400, detail=f"الكرت {number} غير متوفر")
+                reserved_numbers.add(number)
+                cat_id = card.get("category_id") or item.category_id
+                reserved_by_cat[cat_id] = reserved_by_cat.get(cat_id, 0) + 1
+        else:
+            quantity_by_cat[item.category_id] = quantity_by_cat.get(item.category_id, 0) + int(item.quantity)
+
+    for cat_id, required in quantity_by_cat.items():
+        stock = await db.stock.find_one({"category_id": cat_id})
+        quantity_available = max((stock or {}).get("total", 0) - (stock or {}).get("sold", 0), 0)
+        quantity_available += old_qty_by_cat.get(cat_id, 0)
+        numbered_available = await db.cards.count_documents({"category_id": cat_id, "status": "available"})
+        numbered_available += old_numbered_by_cat.get(cat_id, 0)
+        numbered_available -= reserved_by_cat.get(cat_id, 0)
+        if quantity_available + max(numbered_available, 0) < required:
+            raise HTTPException(status_code=400, detail="الكمية غير متوفرة للفئة")
 
 
 # ================= WALLET TRANSFERS (public) =================
@@ -1739,17 +1786,13 @@ async def create_sale(data: SaleIn, user=Depends(require_perm("sales"))):
         items_final.append({**item.model_dump(), "total": line_total})
 
     total = subtotal - (data.discount or 0)
-    remaining = total - (data.paid or 0)
+    paid = total if data.sale_type == "cash" else min(max(float(data.paid or 0), 0), total)
+    remaining = 0.0 if data.sale_type == "cash" else max(total - paid, 0)
 
     # Customer limit check
     customer = None
     if data.customer_id:
         customer = await db.customers.find_one({"id": data.customer_id})
-        if customer and remaining > 0:
-            limit = customer.get("credit_limit", 0)
-            new_balance = customer.get("balance", 0) + remaining
-            if limit > 0 and new_balance > limit:
-                raise HTTPException(status_code=400, detail=f"لا يمكن تنفيذ العملية لأنها تتجاوز سقف حساب العميل ({limit})")
 
     # Auto-pricing based on customer_type if price not set explicitly per item.
     # Precedence: customer.special_prices (if enabled) > cat.sale_price_pos/customer > cat.sale_price.
@@ -1772,6 +1815,18 @@ async def create_sale(data: SaleIn, user=Depends(require_perm("sales"))):
                 if p is not None:
                     items_final[i]["price"] = p
                     items_final[i]["total"] = items_final[i]["quantity"] * p
+
+    subtotal = sum(float(item.get("total", 0) or 0) for item in items_final)
+    total = subtotal - (data.discount or 0)
+    paid = total if data.sale_type == "cash" else min(max(float(data.paid or 0), 0), total)
+    remaining = 0.0 if data.sale_type == "cash" else max(total - paid, 0)
+    if customer and data.sale_type == "credit" and remaining > 0:
+        limit = customer.get("credit_limit", 0)
+        new_balance = float(customer.get("balance", 0) or 0) + remaining
+        if limit > 0 and new_balance > limit:
+            raise HTTPException(status_code=400, detail=f"لا يمكن تنفيذ العملية لأنها تتجاوز سقف حساب العميل ({limit})")
+
+    await _validate_sale_inventory(data.items)
 
     # Reserve/mark cards (numbered) and quantity stock
     for item in data.items:
@@ -1815,7 +1870,7 @@ async def create_sale(data: SaleIn, user=Depends(require_perm("sales"))):
         "subtotal": subtotal,
         "discount": data.discount or 0,
         "total": total,
-        "paid": data.paid or 0,
+        "paid": paid,
         "remaining": remaining,
         "notes": data.notes,
         "user_id": user["id"],
@@ -1834,12 +1889,9 @@ async def create_sale(data: SaleIn, user=Depends(require_perm("sales"))):
     except Exception as _e:
         logger.warning(f"incentive apply failed: {_e}")
 
-    balance_after = None
-    if data.customer_id and remaining > 0:
+    balance_after = float((customer or {}).get("balance", 0) or 0) if customer else None
+    if data.sale_type == "credit" and data.customer_id and remaining > 0:
         balance_after = await _adjust_party_balance("customer", data.customer_id, remaining, number, f"فاتورة مبيعات {number}")
-    elif data.customer_id and data.paid and data.paid > 0:
-        # cash sale for a customer - record as offset if desired (skipping to keep balance clean)
-        pass
 
     await audit_log(user, "create", "sale", doc["id"], None, {"number": number, "total": total})
     await notify(f"فاتورة {number}", f"تم إنشاء فاتورة مبيعات بإجمالي {total}", "info")
@@ -1965,6 +2017,7 @@ async def edit_sale(sid: str, data: SaleEditIn, user=Depends(require_perm("edit_
         new_sale_type = data.sale_type or doc.get("sale_type", "credit")
         if new_sale_type not in ("cash", "credit"):
             raise HTTPException(status_code=400, detail="نوع الفاتورة غير صحيح")
+        await _validate_sale_inventory(data.items, doc.get("items") or [])
         # 1) remove OLD ledger entries + revert balance (keeps statement clean of reversal noise)
         await _reverse_sale_inventory(doc.get("items") or [])
         if doc.get("customer_id") and doc.get("number"):
@@ -1977,11 +2030,12 @@ async def edit_sale(sid: str, data: SaleEditIn, user=Depends(require_perm("edit_
             subtotal += line_total
             items_final.append({**it.model_dump(), "total": line_total})
         new_discount = float(data.discount if data.discount is not None else doc.get("discount", 0) or 0)
-        new_paid = float(data.paid if data.paid is not None else doc.get("paid", 0) or 0)
+        requested_paid = float(data.paid if data.paid is not None else doc.get("paid", 0) or 0)
         new_total = subtotal - new_discount
-        new_remaining = new_total - new_paid
+        new_paid = new_total if new_sale_type == "cash" else min(max(requested_paid, 0), new_total)
+        new_remaining = 0.0 if new_sale_type == "cash" else max(new_total - new_paid, 0)
         # 3) credit limit check on new customer
-        if new_customer_id and new_remaining > 0:
+        if new_sale_type == "credit" and new_customer_id and new_remaining > 0:
             cust = await db.customers.find_one({"id": new_customer_id})
             if cust:
                 limit = cust.get("credit_limit", 0)
@@ -2031,7 +2085,7 @@ async def edit_sale(sid: str, data: SaleEditIn, user=Depends(require_perm("edit_
                     await db.cards.update_many({"id": {"$in": ids}}, {"$set": {"status": "sold", "sold_at": now_iso(), "sold_to": new_customer_id}})
         # 5) apply NEW balance
         balance_after = None
-        if new_customer_id and new_remaining > 0:
+        if new_sale_type == "credit" and new_customer_id and new_remaining > 0:
             balance_after = await _adjust_party_balance(
                 "customer", new_customer_id, new_remaining,
                 doc["number"], f"تعديل فاتورة {doc['number']}",
@@ -2053,17 +2107,20 @@ async def edit_sale(sid: str, data: SaleEditIn, user=Depends(require_perm("edit_
         await audit_log(user, "edit", "sale", sid,
                         {"customer_id": doc.get("customer_id"), "total": doc.get("total"), "items": doc.get("items")},
                         {"customer_id": new_customer_id, "total": new_total, "items": items_final})
-        return {"ok": True, "balance_after": balance_after, "number": doc.get("number")}
+        updated_doc = await db.sales.find_one({"id": sid})
+        return clean_doc({**updated_doc, "balance_after": balance_after})
 
     # --------- LEGACY QUICK EDIT PATH (discount/paid/notes only) ---------
     subtotal = doc.get("subtotal", 0)
     new_discount = data.discount if data.discount is not None else doc.get("discount", 0)
-    new_paid = data.paid if data.paid is not None else doc.get("paid", 0)
+    requested_paid = data.paid if data.paid is not None else doc.get("paid", 0)
     new_total = subtotal - new_discount
-    new_remaining = new_total - new_paid
+    is_cash = doc.get("sale_type") == "cash"
+    new_paid = new_total if is_cash else min(max(float(requested_paid or 0), 0), new_total)
+    new_remaining = 0.0 if is_cash else max(new_total - new_paid, 0)
     old_remaining = doc.get("remaining", 0)
     diff = new_remaining - old_remaining
-    if doc.get("customer_id") and diff != 0:
+    if not is_cash and doc.get("customer_id") and diff != 0:
         customer = await db.customers.find_one({"id": doc["customer_id"]})
         if customer:
             limit = customer.get("credit_limit", 0)
@@ -2078,7 +2135,8 @@ async def edit_sale(sid: str, data: SaleEditIn, user=Depends(require_perm("edit_
               "edited_at": now_iso(), "edited_by": user.get("username")}
     await db.sales.update_one({"id": sid}, {"$set": update})
     await audit_log(user, "edit", "sale", sid, {"old": {"discount": doc.get("discount"), "paid": doc.get("paid")}}, update)
-    return {"ok": True}
+    updated_doc = await db.sales.find_one({"id": sid})
+    return clean_doc(updated_doc)
 
 
 class ReceiptEditIn(BaseModel):
@@ -2133,6 +2191,8 @@ async def create_purchase(data: PurchaseIn, user=Depends(require_perm("purchases
         existing = await db.purchases.find_one({"idempotency_key": data.idempotency_key})
         if existing:
             return clean_doc(existing)
+    if data.purchase_type not in ("cash", "credit"):
+        raise HTTPException(status_code=400, detail="يرجى اختيار نوع الفاتورة: نقد أو آجل.")
 
     subtotal = 0.0
     items_final = []
@@ -2168,14 +2228,16 @@ async def create_purchase(data: PurchaseIn, user=Depends(require_perm("purchases
                     "total": item.quantity, "sold": 0, "used": 0, "created_at": now_iso(),
                 })
     total = subtotal - (data.discount or 0)
-    remaining = total - (data.paid or 0)
+    paid = total if data.purchase_type == "cash" else min(max(float(data.paid or 0), 0), total)
+    remaining = 0.0 if data.purchase_type == "cash" else max(total - paid, 0)
     number = await next_gwd_number()
     doc = {
         "id": str(uuid.uuid4()),
         "number": number, "type": "purchase",
         "supplier_id": data.supplier_id, "supplier_name": data.supplier_name,
+        "purchase_type": data.purchase_type,
         "items": items_final, "subtotal": subtotal, "discount": data.discount or 0,
-        "total": total, "paid": data.paid or 0, "remaining": remaining,
+        "total": total, "paid": paid, "remaining": remaining,
         "notes": data.notes, "user_id": user["id"], "username": user.get("username"),
         "status": "active", "idempotency_key": data.idempotency_key,
         "local_id": data.local_id, "device_id": data.device_id,
@@ -2183,7 +2245,7 @@ async def create_purchase(data: PurchaseIn, user=Depends(require_perm("purchases
     }
     await db.purchases.insert_one(doc)
     balance_after = None
-    if data.supplier_id and remaining > 0:
+    if data.purchase_type == "credit" and data.supplier_id and remaining > 0:
         balance_after = await _adjust_party_balance("supplier", data.supplier_id, remaining, number, f"فاتورة مشتريات {number}")
     await audit_log(user, "create", "purchase", doc["id"])
     await notify(f"مشتريات {number}", f"تم تسجيل فاتورة مشتريات بإجمالي {total}", "info")
@@ -2195,6 +2257,7 @@ class PurchaseEditIn(BaseModel):
     notes: Optional[str] = None
     supplier_id: Optional[str] = None
     supplier_name: Optional[str] = None
+    purchase_type: Optional[str] = None
     items: Optional[List[SaleItemIn]] = None
 
 
@@ -2222,13 +2285,13 @@ async def edit_purchase(pid: str, data: PurchaseEditIn, user=Depends(require_per
     # --------- FULL EDIT PATH ---------
     if data.items is not None:
         new_supplier_id = data.supplier_id or doc.get("supplier_id")
+        new_purchase_type = data.purchase_type or doc.get("purchase_type", "credit")
+        if new_purchase_type not in ("cash", "credit"):
+            raise HTTPException(status_code=400, detail="نوع الفاتورة غير صحيح")
         # 1) reverse OLD inventory + supplier balance
         await _reverse_purchase_inventory(doc.get("items") or [], pid)
-        if doc.get("supplier_id") and doc.get("remaining", 0):
-            await _adjust_party_balance(
-                "supplier", doc["supplier_id"], -float(doc.get("remaining") or 0),
-                doc["number"], f"عكس تأثير فاتورة المشتريات {doc['number']} للتعديل",
-            )
+        if doc.get("supplier_id") and doc.get("number"):
+            await _remove_ledger_by_op("supplier", doc["supplier_id"], doc["number"])
         # 2) compute new totals + apply new inventory
         subtotal = 0.0
         items_final = []
@@ -2265,12 +2328,13 @@ async def edit_purchase(pid: str, data: PurchaseEditIn, user=Depends(require_per
                         "total": it.quantity, "sold": 0, "used": 0, "created_at": now_iso(),
                     })
         new_discount = float(data.discount if data.discount is not None else doc.get("discount", 0) or 0)
-        new_paid = float(data.paid if data.paid is not None else doc.get("paid", 0) or 0)
+        requested_paid = float(data.paid if data.paid is not None else doc.get("paid", 0) or 0)
         new_total = subtotal - new_discount
-        new_remaining = new_total - new_paid
+        new_paid = new_total if new_purchase_type == "cash" else min(max(requested_paid, 0), new_total)
+        new_remaining = 0.0 if new_purchase_type == "cash" else max(new_total - new_paid, 0)
         # 3) apply new supplier balance
         balance_after = None
-        if new_supplier_id and new_remaining > 0:
+        if new_purchase_type == "credit" and new_supplier_id and new_remaining > 0:
             balance_after = await _adjust_party_balance(
                 "supplier", new_supplier_id, new_remaining,
                 doc["number"], f"تعديل فاتورة مشتريات {doc['number']}",
@@ -2282,6 +2346,7 @@ async def edit_purchase(pid: str, data: PurchaseEditIn, user=Depends(require_per
             sup_name = (_s or {}).get("name", doc.get("supplier_name") or "")
         update = {
             "supplier_id": new_supplier_id, "supplier_name": sup_name or doc.get("supplier_name"),
+            "purchase_type": new_purchase_type,
             "items": items_final,
             "subtotal": subtotal, "discount": new_discount, "total": new_total,
             "paid": new_paid, "remaining": new_remaining,
@@ -2292,24 +2357,28 @@ async def edit_purchase(pid: str, data: PurchaseEditIn, user=Depends(require_per
         await audit_log(user, "edit", "purchase", pid,
                         {"supplier_id": doc.get("supplier_id"), "total": doc.get("total"), "items": doc.get("items")},
                         {"supplier_id": new_supplier_id, "total": new_total, "items": items_final})
-        return {"ok": True, "balance_after": balance_after, "number": doc.get("number")}
+        updated_doc = await db.purchases.find_one({"id": pid})
+        return clean_doc({**updated_doc, "balance_after": balance_after})
 
     # --------- LEGACY QUICK EDIT ---------
     subtotal = doc.get("subtotal", 0)
     new_discount = data.discount if data.discount is not None else doc.get("discount", 0)
-    new_paid = data.paid if data.paid is not None else doc.get("paid", 0)
+    requested_paid = data.paid if data.paid is not None else doc.get("paid", 0)
     new_total = subtotal - new_discount
-    new_remaining = new_total - new_paid
-    old_remaining = doc.get("remaining", 0)
-    diff = new_remaining - old_remaining
-    if doc.get("supplier_id") and diff != 0:
-        await _adjust_party_balance("supplier", doc["supplier_id"], diff, doc["number"], f"تعديل فاتورة مشتريات {doc['number']}")
+    is_cash = doc.get("purchase_type", "credit") == "cash"
+    new_paid = new_total if is_cash else min(max(float(requested_paid or 0), 0), new_total)
+    new_remaining = 0.0 if is_cash else max(new_total - new_paid, 0)
+    if doc.get("supplier_id") and doc.get("number"):
+        await _remove_ledger_by_op("supplier", doc["supplier_id"], doc["number"])
+        if not is_cash and new_remaining > 0:
+            await _adjust_party_balance("supplier", doc["supplier_id"], new_remaining, doc["number"], f"فاتورة مشتريات {doc['number']}")
     update = {"discount": new_discount, "paid": new_paid, "total": new_total, "remaining": new_remaining,
               "notes": data.notes if data.notes is not None else doc.get("notes"),
               "edited_at": now_iso(), "edited_by": user.get("username")}
     await db.purchases.update_one({"id": pid}, {"$set": update})
     await audit_log(user, "edit", "purchase", pid, {"old_total": doc.get("total")}, {"new_total": new_total})
-    return {"ok": True}
+    updated_doc = await db.purchases.find_one({"id": pid})
+    return clean_doc(updated_doc)
 
 
 @api.get("/purchases")
@@ -2442,7 +2511,7 @@ async def cash_summary(
 ):
     """Compute cash box totals from all sources:
     IN  = cash sales + receipt vouchers + transfers TO cash
-    OUT = payment vouchers + expenses + transfers FROM cash"""
+    OUT = cash purchases + payment vouchers + expenses + transfers FROM cash"""
     s_iso = f"{start}T00:00:00+03:00" if start else None
     e_iso = f"{end}T23:59:59+03:00" if end else None
 
@@ -2452,6 +2521,7 @@ async def cash_summary(
         return True
 
     sales = await db.sales.find({"status": "active", "sale_type": "cash"}).to_list(20000)
+    purchases = await db.purchases.find({"status": "active", "purchase_type": "cash"}).to_list(20000)
     recs = await db.receipts.find({"status": "active"}).to_list(20000)
     exps = await db.expenses.find({"status": "active"}).to_list(20000)
     trs = await db.transfers.find({"status": "active"}).to_list(20000)
@@ -2459,7 +2529,8 @@ async def cash_summary(
     total_in_all = sum(s.get("total", 0) for s in sales) \
         + sum(r.get("amount", 0) for r in recs if r.get("kind") == "receipt") \
         + sum(t.get("amount", 0) for t in trs if t.get("dest_type") == "cash")
-    total_out_all = sum(r.get("amount", 0) for r in recs if r.get("kind") == "payment") \
+    total_out_all = sum(p.get("total", 0) for p in purchases) \
+        + sum(r.get("amount", 0) for r in recs if r.get("kind") == "payment") \
         + sum(e.get("amount", 0) for e in exps) \
         + sum(t.get("amount", 0) for t in trs if t.get("source_type") == "cash")
     running_balance = total_in_all - total_out_all
@@ -2467,7 +2538,8 @@ async def cash_summary(
     filt_in = sum(s.get("total", 0) for s in sales if in_range(s.get("created_at", ""))) \
               + sum(r.get("amount", 0) for r in recs if r.get("kind") == "receipt" and in_range(r.get("created_at", ""))) \
               + sum(t.get("amount", 0) for t in trs if t.get("dest_type") == "cash" and in_range(t.get("created_at", "")))
-    filt_out = sum(r.get("amount", 0) for r in recs if r.get("kind") == "payment" and in_range(r.get("created_at", ""))) \
+    filt_out = sum(p.get("total", 0) for p in purchases if in_range(p.get("created_at", ""))) \
+               + sum(r.get("amount", 0) for r in recs if r.get("kind") == "payment" and in_range(r.get("created_at", ""))) \
                + sum(e.get("amount", 0) for e in exps if in_range(e.get("created_at", ""))) \
                + sum(t.get("amount", 0) for t in trs if t.get("source_type") == "cash" and in_range(t.get("created_at", "")))
 
@@ -2479,6 +2551,7 @@ async def cash_summary(
         "net": filt_in - filt_out,
         "counts": {
             "cash_sales": sum(1 for s in sales if in_range(s.get("created_at", ""))),
+            "cash_purchases": sum(1 for p in purchases if in_range(p.get("created_at", ""))),
             "receipts": sum(1 for r in recs if r.get("kind") == "receipt" and in_range(r.get("created_at", ""))),
             "payments": sum(1 for r in recs if r.get("kind") == "payment" and in_range(r.get("created_at", ""))),
             "expenses": sum(1 for e in exps if in_range(e.get("created_at", ""))),
@@ -2503,6 +2576,7 @@ async def cash_statement(
             if e_iso: base["created_at"]["$lte"] = e_iso
         return base
     sales = await db.sales.find(q({"status": "active", "sale_type": "cash"})).to_list(5000)
+    purchases = await db.purchases.find(q({"status": "active", "purchase_type": "cash"})).to_list(5000)
     recs = await db.receipts.find(q({"status": "active"})).to_list(5000)
     exps = await db.expenses.find(q({"status": "active"})).to_list(5000)
     trs = await db.transfers.find(q({"status": "active"})).to_list(5000)
@@ -2511,6 +2585,10 @@ async def cash_statement(
         entries.append({"created_at": s["created_at"], "type": "cash_sale", "number": s.get("number"),
                         "description": f"مبيعات نقدية — {s.get('customer_name') or 'نقدي'}",
                         "in": s.get("total", 0), "out": 0})
+    for p in purchases:
+        entries.append({"created_at": p["created_at"], "type": "cash_purchase", "number": p.get("number"),
+                        "description": f"مشتريات نقدية — {p.get('supplier_name') or 'نقدي'}",
+                        "in": 0, "out": p.get("total", 0)})
     for r in recs:
         if r.get("kind") == "receipt":
             entries.append({"created_at": r["created_at"], "type": "receipt", "number": r.get("number"),
@@ -2651,10 +2729,12 @@ async def list_accounts(user=Depends(get_current_user)):
     # Cash summary as a virtual account
     cash_all = 0.0
     sales = await db.sales.find({"status": "active", "sale_type": "cash"}).to_list(20000)
+    purchases = await db.purchases.find({"status": "active", "purchase_type": "cash"}).to_list(20000)
     recs = await db.receipts.find({"status": "active"}).to_list(20000)
     exps = await db.expenses.find({"status": "active"}).to_list(20000)
     trs = await db.transfers.find({"status": "active"}).to_list(20000)
     cash_all = (sum(s.get("total",0) for s in sales)
+                - sum(p.get("total",0) for p in purchases)
                 + sum(r.get("amount",0) for r in recs if r.get("kind")=="receipt")
                 + sum(t.get("amount",0) for t in trs if t.get("dest_type")=="cash")
                 - sum(r.get("amount",0) for r in recs if r.get("kind")=="payment")
@@ -2890,6 +2970,7 @@ async def account_statement(
     elif ptype == "cash":
         # Cash box statement — mimic /cash/statement
         sales = await db.sales.find({"status": "active", "sale_type": "cash"}).to_list(20000)
+        purchases = await db.purchases.find({"status": "active", "purchase_type": "cash"}).to_list(20000)
         recs = await db.receipts.find({"status": "active"}).to_list(20000)
         exps = await db.expenses.find({"status": "active"}).to_list(20000)
         trs = await db.transfers.find({"status": "active"}).to_list(20000)
@@ -2897,6 +2978,10 @@ async def account_statement(
             entries.append({"created_at": s.get("created_at",""), "number": s.get("number",""),
                             "description": f"مبيعات نقدية — {s.get('customer_name','') or 'نقدي'}",
                             "debit": s.get("total", 0), "credit": 0})
+        for p in purchases:
+            entries.append({"created_at": p.get("created_at",""), "number": p.get("number",""),
+                            "description": f"مشتريات نقدية — {p.get('supplier_name','') or 'نقدي'}",
+                            "debit": 0, "credit": p.get("total", 0)})
         for r in recs:
             if r.get("kind") == "receipt":
                 entries.append({"created_at": r.get("created_at",""), "number": r.get("number",""),

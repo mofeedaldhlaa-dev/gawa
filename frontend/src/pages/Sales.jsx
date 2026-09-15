@@ -3,7 +3,8 @@ import api, { errText } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Link } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import InvoiceSuccessDialog from "@/components/InvoiceSuccessDialog";
 import { fmt, fmtDate, openWhatsApp, buildInvoiceMessage } from "@/lib/utils";
 import { printSaleInvoice, printReport } from "@/lib/print";
 import { useAuth } from "@/lib/auth";
@@ -25,11 +26,14 @@ const startOfYear = () => { const d = new Date(); return new Date(d.getFullYear(
 
 export default function Sales() {
   const { user } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [items, setItems] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [banks, setBanks] = useState([]);
   const [q, setQ] = useState("");
   const [viewing, setViewing] = useState(null);
+  const [successInvoice, setSuccessInvoice] = useState(location.state?.savedInvoice || null);
   const [settings, setSettings] = useState({ company_name: "شبكة جواد نت اللاسلكية" });
 
   const [period, setPeriod] = useState("month"); // day | month | year | custom
@@ -44,6 +48,12 @@ export default function Sales() {
     api.get("/settings").then((r) => setSettings(r.data));
     api.get("/bank-accounts").then((r) => setBanks(r.data)).catch(() => {});
   }, [q]);
+
+  useEffect(() => {
+    if (!location.state?.savedInvoice) return;
+    setSuccessInvoice(location.state.savedInvoice);
+    navigate(location.pathname, { replace: true, state: {} });
+  }, [location.pathname, location.state, navigate]);
 
   const applyPreset = (p) => {
     setPeriod(p);
@@ -76,7 +86,7 @@ export default function Sales() {
   }, [filtered]);
 
   const doPrint = (s) => {
-    const customer = customers.find((c) => c.id === s.customer_id);
+    const customer = customers.find((c) => c.id === s.customer_id) || { phone: s.account_phone };
     printSaleInvoice({ sale: s, customer, username: user?.name || user?.username, banks });
   };
 
@@ -119,14 +129,15 @@ export default function Sales() {
 
   const sendWA = (s) => {
     const cust = customers.find((c) => c.id === s.customer_id);
-    if (!cust?.phone) { toast.error("لا يوجد رقم هاتف مسجل لهذا الحساب."); return; }
+    const phone = cust?.phone || s.account_phone;
+    if (!phone) { toast.error("لا يوجد رقم هاتف مسجل لهذا الحساب."); return; }
     const details = (s.items || []).map((i) => `${i.category_name} × ${i.quantity} = ${fmt(i.total)}`).join("\n");
     const msg = buildInvoiceMessage({
       company: settings.company_name, number: s.number, kind: "مبيعات",
       details, amount: s.subtotal, discount: s.discount, total: s.total,
-      paid: s.paid, remaining: s.remaining, balance_after: cust.balance,
+      paid: s.paid, remaining: s.remaining, balance_after: s.balance_after ?? cust?.balance,
     });
-    openWhatsApp(cust.phone, msg);
+    openWhatsApp(phone, msg);
   };
 
   const saleTypeLabelOf = (s) => s.source === "public_order" ? "إلكترونية" : (s.sale_type === "cash" ? "نقدي" : "آجل");
@@ -259,6 +270,16 @@ export default function Sales() {
           )}
         </DialogContent>
       </Dialog>
+
+      <InvoiceSuccessDialog
+        open={!!successInvoice}
+        onOpenChange={(open) => !open && setSuccessInvoice(null)}
+        invoice={successInvoice}
+        accountName={successInvoice?.customer_name}
+        paymentType={successInvoice?.sale_type === "cash" ? "نقد" : "آجل"}
+        onWhatsApp={() => successInvoice && sendWA(successInvoice)}
+        onPrint={() => successInvoice && doPrint(successInvoice)}
+      />
     </div>
   );
 }

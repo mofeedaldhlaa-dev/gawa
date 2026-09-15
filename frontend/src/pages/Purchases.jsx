@@ -3,8 +3,9 @@ import api, { errText } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Link } from "react-router-dom";
-import { fmt, fmtDate } from "@/lib/utils";
+import InvoiceSuccessDialog from "@/components/InvoiceSuccessDialog";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { buildInvoiceMessage, fmt, fmtDate, openWhatsApp } from "@/lib/utils";
 import { Plus, Printer, Eye, Edit, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { printPurchase } from "@/lib/print";
@@ -12,21 +13,46 @@ import { useAuth } from "@/lib/auth";
 
 export default function Purchases() {
   const { user } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [items, setItems] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
   const [banks, setBanks] = useState([]);
   const [viewing, setViewing] = useState(null);
+  const [successInvoice, setSuccessInvoice] = useState(location.state?.savedInvoice || null);
+  const [settings, setSettings] = useState({ company_name: "شبكة جواد نت اللاسلكية" });
 
   const load = () => api.get("/purchases").then((r) => setItems(r.data));
   useEffect(() => {
     load();
     api.get("/suppliers").then((r) => setSuppliers(r.data));
+    api.get("/settings").then((r) => setSettings(r.data));
     api.get("/bank-accounts").then((r) => setBanks(r.data)).catch(() => {});
   }, []);
 
+  useEffect(() => {
+    if (!location.state?.savedInvoice) return;
+    setSuccessInvoice(location.state.savedInvoice);
+    navigate(location.pathname, { replace: true, state: {} });
+  }, [location.pathname, location.state, navigate]);
+
   const doPrint = (p) => {
-    const supplier = suppliers.find((s) => s.id === p.supplier_id);
+    const supplier = suppliers.find((s) => s.id === p.supplier_id) || { phone: p.account_phone };
     printPurchase({ purchase: p, supplier, username: user?.name || user?.username, banks });
+  };
+
+  const sendWA = (p) => {
+    const supplier = suppliers.find((s) => s.id === p.supplier_id);
+    const phone = supplier?.phone || p.account_phone;
+    if (!phone) { toast.error("لا يوجد رقم هاتف مسجل لهذا الحساب."); return; }
+    const details = (p.items || []).map((i) => `${i.category_name} × ${i.quantity} = ${fmt(i.total)}`).join("\n");
+    const msg = buildInvoiceMessage({
+      company: settings.company_name, number: p.number, kind: "مشتريات",
+      details, amount: p.subtotal, discount: p.discount, total: p.total,
+      paid: p.paid, remaining: p.remaining,
+      balance_after: p.balance_after ?? supplier?.balance,
+    });
+    openWhatsApp(phone, msg);
   };
 
   const removePurchase = async (p) => {
@@ -44,13 +70,14 @@ export default function Purchases() {
       <div className="flex justify-end no-print"><Link to="/purchases/new"><Button className="bg-[#221340]" data-testid="new-purchase-btn"><Plus size={16} className="ml-1"/> مشتريات جديدة</Button></Link></div>
       <Card className="overflow-x-auto hidden md:block">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50"><tr className="text-right"><th className="p-3">الرقم</th><th className="p-3">التاريخ</th><th className="p-3">المورد</th><th className="p-3">الإجمالي</th><th className="p-3">المدفوع</th><th className="p-3">المتبقي</th><th className="p-3 no-print"></th></tr></thead>
+          <thead className="bg-slate-50"><tr className="text-right"><th className="p-3">الرقم</th><th className="p-3">التاريخ</th><th className="p-3">المورد</th><th className="p-3">النوع</th><th className="p-3">الإجمالي</th><th className="p-3">المدفوع</th><th className="p-3">المتبقي</th><th className="p-3 no-print"></th></tr></thead>
           <tbody>
             {items.map((p) => (
               <tr key={p.id} className="border-t border-slate-100">
                 <td className="p-3 font-mono text-[#452480] font-bold">{p.number}</td>
                 <td className="p-3">{fmtDate(p.created_at)}</td>
                 <td className="p-3">{p.supplier_name}</td>
+                <td className="p-3"><span className={`text-xs px-2 py-0.5 rounded-full ${p.purchase_type === "cash" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{p.purchase_type === "cash" ? "نقد" : "آجل"}</span></td>
                 <td className="p-3 num">{fmt(p.total)}</td>
                 <td className="p-3 num">{fmt(p.paid)}</td>
                 <td className="p-3 num text-amber-700">{fmt(p.remaining)}</td>
@@ -62,7 +89,7 @@ export default function Purchases() {
                 </td>
               </tr>
             ))}
-            {items.length === 0 && <tr><td colSpan={7} className="p-6 text-center text-slate-400">لا توجد فواتير مشتريات</td></tr>}
+            {items.length === 0 && <tr><td colSpan={8} className="p-6 text-center text-slate-400">لا توجد فواتير مشتريات</td></tr>}
           </tbody>
         </table>
       </Card>
@@ -73,6 +100,7 @@ export default function Purchases() {
               <div className="min-w-0">
                 <div className="font-mono font-bold text-[#452480] truncate">{p.number}</div>
                 <div className="text-xs text-slate-500 truncate">{p.supplier_name} • {fmtDate(p.created_at)}</div>
+                <span className={`mt-1 inline-block rounded-full px-2 py-0.5 text-[10px] ${p.purchase_type === "cash" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{p.purchase_type === "cash" ? "نقد" : "آجل"}</span>
               </div>
               <div className="text-left text-xs shrink-0">
                 <div>الإجمالي: <span className="num font-bold">{fmt(p.total)}</span></div>
@@ -94,9 +122,10 @@ export default function Purchases() {
         <DialogContent>
           <DialogHeader><DialogTitle>فاتورة مشتريات {viewing?.number}</DialogTitle></DialogHeader>
           {viewing && (
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between"><span>التاريخ</span><span>{fmtDate(viewing.created_at)}</span></div>
-              <div className="flex justify-between"><span>المورد</span><span>{viewing.supplier_name}</span></div>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between"><span>التاريخ</span><span>{fmtDate(viewing.created_at)}</span></div>
+                <div className="flex justify-between"><span>المورد</span><span>{viewing.supplier_name}</span></div>
+                <div className="flex justify-between"><span>النوع</span><span>{viewing.purchase_type === "cash" ? "نقد" : "آجل"}</span></div>
               <div className="border-t pt-2">
                 {(viewing.items || []).map((it, i) => (
                   <div key={i} className="flex justify-between py-1"><span>{it.category_name} × {it.quantity}</span><span className="num">{fmt(it.total)}</span></div>
@@ -117,6 +146,16 @@ export default function Purchases() {
           )}
         </DialogContent>
       </Dialog>
+
+      <InvoiceSuccessDialog
+        open={!!successInvoice}
+        onOpenChange={(open) => !open && setSuccessInvoice(null)}
+        invoice={successInvoice}
+        accountName={successInvoice?.supplier_name}
+        paymentType={successInvoice?.purchase_type === "cash" ? "نقد" : "آجل"}
+        onWhatsApp={() => successInvoice && sendWA(successInvoice)}
+        onPrint={() => successInvoice && doPrint(successInvoice)}
+      />
 
     </div>
   );

@@ -81,7 +81,12 @@ def _get_supp_balance(hdr, sid):
 def _get_stock(hdr, cat_id):
     for s in requests.get(f"{API}/stock", headers=hdr).json():
         if s.get("category_id") == cat_id:
-            return s
+            quantity = s.get("quantity") or {}
+            return {
+                **s,
+                "total": s.get("total", quantity.get("total", 0)),
+                "sold": s.get("sold", quantity.get("sold", 0)),
+            }
     return None
 
 
