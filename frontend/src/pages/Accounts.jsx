@@ -12,7 +12,7 @@ import { toast } from "sonner";
 import { fmt, fmtDate, genUUID } from "@/lib/utils";
 import { printReport } from "@/lib/print";
 import { useAuth } from "@/lib/auth";
-import { ArrowLeftRight, Printer, Filter } from "lucide-react";
+import { ArrowLeftRight, Printer, Filter, FileText } from "lucide-react";
 
 const TYPE_LABELS = {
   all: "الكل",
@@ -122,9 +122,7 @@ export default function Accounts() {
 
   const partyLink = (a) => {
     if (a.type === "customer" || a.type === "pos") return `/customers/${a.id}`;
-    if (a.type === "supplier") return `/suppliers`;
-    if (a.type === "expense") return `/expenses`;
-    return "#";
+    return `/accounts/${a.type}/${a.id}`;
   };
 
   return (
@@ -179,9 +177,11 @@ export default function Accounts() {
                 <td className="p-3 font-mono text-xs">{a.phone || "-"}</td>
                 <td className={`p-3 num font-bold ${a.balance >= 0 ? (a.type === "supplier" ? "text-amber-700" : "text-slate-800") : "text-red-700"}`}>{fmt(a.balance)}</td>
                 <td className="p-3 no-print">
-                  {a.type !== "cash" && (
-                    <Link to={partyLink(a)} className="text-[#452480] text-xs hover:underline" data-testid={`acc-open-${a.id}`}>عرض</Link>
-                  )}
+                  <Link to={partyLink(a)} data-testid={`acc-open-${a.id}`}>
+                    <Button size="sm" variant="outline" className="h-8 border-[#452480] text-[#452480]">
+                      <FileText size={13} className="ml-1" /> كشف الحساب
+                    </Button>
+                  </Link>
                 </td>
               </tr>
             ))}
